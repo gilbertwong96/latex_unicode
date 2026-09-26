@@ -3,213 +3,259 @@ defmodule LatexUnicode.Width do
   Terminal display width of rendered math text.
 
   Math output is plain text, so this is pi-tui's `visibleWidth`/`graphemeWidth`
-  math without the ANSI handling pie's transcript needs: East Asian
-  wide/fullwidth and emoji clusters count two cells, zero-width clusters none,
-  everything else one.
+  math: East Asian wide and fullwidth codepoints, emoji clusters and flags take
+  two cells, zero-width clusters none, everything else one.
+
+  A host measures its own lines with this as well as the renderer's, so two
+  things go past pi's version. Escape sequences take no cells and are stripped
+  before measuring, and the cache of measured strings lives in the calling
+  process rather than in a table every process in the VM can see.
   """
 
-  @doc "Display width of plain text in terminal cells."
+  alias LatexUnicode.Width.EastAsianWidth
+
+  # pi bounds its width cache at 512 strings and drops the oldest; the same bound
+  # keeps a long session's measurements from growing without limit.
+  @cache_size 512
+  @cache_key {__MODULE__, :cache}
+
+  # Mark categories and properties, per codepoint. pi spells these as Unicode
+  # property regexes; Erlang's `re` has them all except the `Mark` and `Control`
+  # aggregates, which are spelled out here.
+  @mark ~r/^[\p{Mn}\p{Mc}\p{Me}]$/u
+  @spacing_mark ~r/^[\p{Mc}]$/u
+  @zero_width ~r/^[\p{Default_Ignorable_Code_Point}\p{Cc}\p{Cs}\p{Mn}\p{Mc}\p{Me}]$/u
+  @non_printing ~r/^[\p{Default_Ignorable_Code_Point}\p{Cc}\p{Cf}\p{Cs}\p{Mn}\p{Mc}\p{Me}]$/u
+  @emoji_presentation ~r/^[\p{Emoji_Presentation}]$/u
+  @extended_pictographic ~r/^[\p{Extended_Pictographic}]$/u
+
+  # pi's `terminalSpacingMarkRegex`: spacing marks take a cell of their own, less
+  # the three that do not, plus the non-spacing exceptions legacy wcwidth tables
+  # give a cell to.
+  @spacing_mark_exceptions [0x1734, 0x302E, 0x302F]
+  @legacy_spacing_marks [
+    0x065F,
+    0x0F7F,
+    0x102B,
+    0x102C,
+    0x1031,
+    0x1033,
+    0x1034,
+    0x1035,
+    0x1038,
+    0x103A,
+    0x103B,
+    0x103C,
+    0x103D,
+    0x103E
+  ]
+
+  @doc """
+  Display width of `text` in terminal cells.
+
+  ANSI, OSC and APC escape sequences are stripped first, and a tab counts as
+  three cells, the way pi measures a line it is about to render.
+  """
   @spec display(String.t()) :: non_neg_integer()
+  def display(""), do: 0
+
   def display(text) do
-    text
-    |> String.graphemes()
-    |> Enum.reduce(0, fn grapheme, acc -> acc + grapheme_width(grapheme) end)
+    if printable_ascii?(text) do
+      byte_size(text)
+    else
+      case cached(text) do
+        nil ->
+          width = text |> without_escapes() |> measure()
+          cache(text, width)
+          width
+
+        width ->
+          width
+      end
+    end
   end
 
   @doc "Terminal display width of one grapheme cluster (pi's graphemeWidth)."
   @spec grapheme_width(String.t()) :: non_neg_integer()
   def grapheme_width("\t"), do: 3
 
-  # The full computation walks several codepoint range tables; the width
-  # cache keeps per-frame transcript redraws cheap (pi's widthCache).
-  @width_cache :pie_grapheme_width_cache
-
-  def grapheme_width(g) do
-    case cached_width(g) do
-      nil ->
-        w = compute_grapheme_width(g)
-        _ = ensure_width_cache()
-        :ets.insert(@width_cache, {g, w})
-        w
-
-      w ->
-        w
+  def grapheme_width(grapheme) do
+    case :unicode.characters_to_list(grapheme) do
+      codepoints when is_list(codepoints) -> cluster_width(codepoints)
+      _not_unicode -> 1
     end
   end
 
-  # The table lives in whichever process created it first; when that owner
-  # exits the table disappears, so every read tolerates its absence.
-  defp cached_width(g) do
-    if :ets.whereis(@width_cache) == :undefined do
-      nil
-    else
-      case :ets.lookup(@width_cache, g) do
-        [{^g, w}] -> w
-        [] -> nil
-      end
-    end
-  rescue
-    ArgumentError -> nil
+  defp measure(text) do
+    text
+    |> String.graphemes()
+    |> Enum.reduce(0, fn grapheme, acc -> acc + grapheme_width(grapheme) end)
   end
 
-  defp ensure_width_cache do
-    if :ets.whereis(@width_cache) == :undefined do
-      :ets.new(@width_cache, [:named_table, :public, :set, read_concurrency: true])
+  # Nothing to segment, strip or look up: pi's `isPrintableAscii` fast path, which
+  # is what most of a rendered line is.
+  defp printable_ascii?(<<byte, rest::binary>>) when byte in 0x20..0x7E,
+    do: printable_ascii?(rest)
+
+  defp printable_ascii?(<<>>), do: true
+  defp printable_ascii?(_other), do: false
+
+  # pi's order: marks a terminal gives cells to even with no base under them,
+  # then clusters that take no cells at all, then everything that is visible.
+  defp cluster_width(codepoints) do
+    cond do
+      Enum.all?(codepoints, &spacing_mark?/1) ->
+        length(codepoints)
+
+      Enum.all?(codepoints, &zero_width?/1) ->
+        0
+
+      true ->
+        visible_width(codepoints)
     end
-  rescue
-    ArgumentError -> :ok
   end
 
-  defp compute_grapheme_width(g) do
-    case :unicode.characters_to_list(g) do
+  defp visible_width(codepoints) do
+    case Enum.drop_while(codepoints, &non_printing?/1) do
       [] ->
         0
 
-      cps ->
-        cond do
-          Enum.all?(cps, &zero_width_codepoint?/1) -> 0
-          emoji_presentation?(cps) -> 2
-          wide?(hd(cps)) -> 2
-          true -> 1
+      [base | rest] ->
+        if emoji?(base, codepoints) do
+          2
+        else
+          region_width(base) + trailing_width(rest, false)
         end
     end
   end
 
-  # Regional indicators (flags) and the SMP emoji/symbol planes render 2
-  # cells; a VS16 suffix forces emoji presentation for BMP symbols that
-  # default to text presentation (❤️ ❗ ☀️ …).
-  defp emoji_presentation?([cp | rest]) do
+  # A flag's regional indicator is two cells wide, and the East Asian Width table
+  # answers for everything else.
+  defp region_width(codepoint) do
+    if codepoint in 0x1F1E6..0x1F1FF do
+      2
+    else
+      EastAsianWidth.columns(codepoint)
+    end
+  end
+
+  # Codepoints after the base can each take a cell of their own: a spacing mark
+  # always does, and a consonant or vowel that follows a mark (Devanagari, Thai,
+  # Lao) is visible by itself. pi walks the same cases.
+  defp trailing_width([], _follows_mark), do: 0
+
+  defp trailing_width([codepoint | rest], follows_mark) do
     cond do
-      cp in 0x1F1E6..0x1F1FF -> true
-      cp in 0x1F000..0x1FAFF -> true
-      0xFE0F in rest and cp in 0x2000..0x2BFF -> true
-      0xFE0F in rest and cp in [0x00A9, 0x00AE] -> true
+      spacing_mark?(codepoint) ->
+        1 + trailing_width(rest, false)
+
+      mark?(codepoint) ->
+        trailing_width(rest, true)
+
+      non_printing?(codepoint) ->
+        trailing_width(rest, follows_mark)
+
+      follows_mark or codepoint in 0xFF00..0xFFEF ->
+        EastAsianWidth.columns(codepoint) + trailing_width(rest, false)
+
+      codepoint in [0x0E33, 0x0EB3] ->
+        1 + trailing_width(rest, false)
+
+      true ->
+        trailing_width(rest, false)
+    end
+  end
+
+  # pi asks `\p{RGI_Emoji}` of the whole cluster, which Erlang's `re` does not
+  # have. The codepoint properties it does have answer the same for every cluster
+  # the terminal shows as an emoji: a codepoint that presents as one by default, a
+  # flag, or a pictograph with a variation selector forcing emoji presentation —
+  # which is also what makes a keycap an emoji, since `1` is not one on its own.
+  defp emoji?(base, codepoints) do
+    cond do
+      emoji_presentation?(base) -> true
+      base in 0x1F1E6..0x1F1FF -> true
+      0xFE0F in codepoints -> extended_pictographic?(base) or 0x20E3 in codepoints
       true -> false
     end
   end
 
-  defp emoji_presentation?(_), do: false
-
-  # Zero-width codepoints: variation selectors, joiners, combining marks,
-  # bidi/format controls (pragmatic subset of the UCD Mark/Format tables).
-  @zero_width_ranges [
-    {0x0300, 0x036F},
-    {0x0483, 0x0489},
-    {0x0591, 0x05BD},
-    {0x05BF, 0x05BF},
-    {0x05C1, 0x05C2},
-    {0x05C4, 0x05C5},
-    {0x05C7, 0x05C7},
-    {0x0610, 0x061A},
-    {0x064B, 0x065F},
-    {0x0670, 0x0670},
-    {0x06D6, 0x06DC},
-    {0x06DF, 0x06E4},
-    {0x06E7, 0x06E8},
-    {0x06EA, 0x06ED},
-    {0x0711, 0x0711},
-    {0x0730, 0x074A},
-    {0x07A6, 0x07B0},
-    {0x07EB, 0x07F3},
-    {0x0816, 0x0819},
-    {0x081B, 0x0823},
-    {0x0825, 0x0827},
-    {0x0829, 0x082D},
-    {0x093C, 0x093C},
-    {0x0941, 0x0948},
-    {0x094D, 0x094D},
-    {0x0951, 0x0957},
-    {0x0962, 0x0963},
-    {0x0E31, 0x0E31},
-    {0x0E34, 0x0E3A},
-    {0x0E47, 0x0E4E},
-    {0x200B, 0x200F},
-    {0x202A, 0x202E},
-    {0x2060, 0x2064},
-    {0x2066, 0x206F},
-    {0x20D0, 0x20F0},
-    {0xFE00, 0xFE0F},
-    {0xFEFF, 0xFEFF},
-    {0xFFF9, 0xFFFB},
-    {0xE0100, 0xE01EF}
-  ]
-
-  defp zero_width_codepoint?(cp) do
-    Enum.any?(@zero_width_ranges, fn {lo, hi} -> cp in lo..hi end)
+  defp spacing_mark?(codepoint) do
+    codepoint in @legacy_spacing_marks or
+      (codepoint not in @spacing_mark_exceptions and matches?(@spacing_mark, codepoint))
   end
 
-  # East Asian Wide and Fullwidth codepoints (UAX #11), including the
-  # BMP codepoints terminals render wide by default (emoji with emoji
-  # presentation); everything else that is not zero-width or emoji
-  # presentation renders 1 column.
-  @wide_ranges [
-    {0x1100, 0x115F},
-    {0x231A, 0x231B},
-    {0x2329, 0x232A},
-    {0x23E9, 0x23EC},
-    {0x23F0, 0x23F1},
-    {0x23F3, 0x23F3},
-    {0x25FD, 0x25FE},
-    {0x2614, 0x2615},
-    {0x2648, 0x2653},
-    {0x267F, 0x267F},
-    {0x2693, 0x2693},
-    {0x26A1, 0x26A1},
-    {0x26AA, 0x26AB},
-    {0x26BD, 0x26BE},
-    {0x26C4, 0x26C5},
-    {0x26CE, 0x26CE},
-    {0x26D4, 0x26D4},
-    {0x26EA, 0x26EA},
-    {0x26F2, 0x26F3},
-    {0x26F5, 0x26F5},
-    {0x26FA, 0x26FA},
-    {0x26FD, 0x26FD},
-    {0x2705, 0x2705},
-    {0x270A, 0x270B},
-    {0x2728, 0x2728},
-    {0x274C, 0x274C},
-    {0x274E, 0x274E},
-    {0x2753, 0x2755},
-    {0x2757, 0x2757},
-    {0x2795, 0x2797},
-    {0x27B0, 0x27B0},
-    {0x27BF, 0x27BF},
-    {0x2B1B, 0x2B1C},
-    {0x2B50, 0x2B50},
-    {0x2B55, 0x2B55},
-    {0x2E80, 0x303E},
-    {0x3041, 0x33FF},
-    {0x3400, 0x4DBF},
-    {0x4E00, 0x9FFF},
-    {0xA000, 0xA4CF},
-    {0xA960, 0xA97C},
-    {0xAC00, 0xD7A3},
-    {0xF900, 0xFAFF},
-    {0xFE10, 0xFE19},
-    {0xFE30, 0xFE52},
-    {0xFE54, 0xFE66},
-    {0xFE68, 0xFE6B},
-    {0xFF00, 0xFF60},
-    {0xFFE0, 0xFFE6},
-    {0x16FE0, 0x16FE4},
-    {0x16FF0, 0x16FF1},
-    {0x17000, 0x187F7},
-    {0x18800, 0x18CD5},
-    {0x18D00, 0x18D08},
-    {0x1AFF0, 0x1B16F},
-    {0x1F004, 0x1F004},
-    {0x1F0CF, 0x1F0CF},
-    {0x1F18E, 0x1F18E},
-    {0x1F191, 0x1F19A},
-    {0x1F200, 0x1F2FF},
-    {0x20000, 0x2FFFD},
-    {0x30000, 0x3FFFD}
-  ]
+  defp mark?(codepoint), do: matches?(@mark, codepoint)
+  defp zero_width?(codepoint), do: matches?(@zero_width, codepoint)
+  defp non_printing?(codepoint), do: matches?(@non_printing, codepoint)
+  defp emoji_presentation?(codepoint), do: matches?(@emoji_presentation, codepoint)
+  defp extended_pictographic?(codepoint), do: matches?(@extended_pictographic, codepoint)
 
-  @doc "Whether a codepoint renders double-width (East Asian wide/fullwidth, emoji)."
-  @spec wide?(non_neg_integer()) :: boolean()
-  def wide?(cp) when is_integer(cp) do
-    Enum.any?(@wide_ranges, fn {lo, hi} -> cp in lo..hi end)
+  defp matches?(regex, codepoint), do: Regex.match?(regex, <<codepoint::utf8>>)
+
+  defp without_escapes(text) do
+    if :binary.match(text, <<0x1B>>) == :nomatch, do: text, else: strip_escapes(text)
+  end
+
+  # CSI (`ESC [ …` styling and cursor codes), OSC (`ESC ] …` hyperlinks and prompt
+  # markers) and APC (`ESC _ …`), each ending where the terminal says it does. pi's
+  # own scan ends a CSI only on `m/G/K/H/J`, so it counts `ESC[?25l` as five cells;
+  # the standard final byte range is what the cursor can be trusted to be hidden
+  # with.
+  defp strip_escapes(text), do: strip_escapes(text, [])
+
+  defp strip_escapes(<<0x1B, "[", rest::binary>>, acc), do: strip_escapes(skip_csi(rest), acc)
+
+  defp strip_escapes(<<0x1B, "]", rest::binary>>, acc),
+    do: strip_escapes(skip_terminated(rest), acc)
+
+  defp strip_escapes(<<0x1B, "_", rest::binary>>, acc),
+    do: strip_escapes(skip_terminated(rest), acc)
+
+  defp strip_escapes(<<codepoint::utf8, rest::binary>>, acc) do
+    strip_escapes(rest, [<<codepoint::utf8>> | acc])
+  end
+
+  defp strip_escapes(<<byte, rest::binary>>, acc), do: strip_escapes(rest, [byte | acc])
+  defp strip_escapes(<<>>, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
+  defp skip_csi(<<byte, rest::binary>>) when byte in 0x40..0x7E, do: rest
+  defp skip_csi(<<_byte, rest::binary>>), do: skip_csi(rest)
+  defp skip_csi(<<>>), do: <<>>
+
+  defp skip_terminated(<<0x07, rest::binary>>), do: rest
+  defp skip_terminated(<<0x1B, "\\", rest::binary>>), do: rest
+  defp skip_terminated(<<_byte, rest::binary>>), do: skip_terminated(rest)
+  defp skip_terminated(<<>>), do: <<>>
+
+  # A host redraws the same lines every frame, so the strings it measures are
+  # mostly ones this process has measured before (pi keeps the same cache in a
+  # module-level map, which in the BEAM would be a table shared by every process).
+  defp cached(text) do
+    case Process.get(@cache_key) do
+      nil -> nil
+      {entries, _order} -> Map.get(entries, text)
+    end
+  end
+
+  defp cache(text, width) do
+    {entries, order} =
+      case Process.get(@cache_key) do
+        nil -> {%{}, :queue.new()}
+        {entries, order} -> {entries, order}
+      end
+
+    {entries, order} =
+      if map_size(entries) < @cache_size do
+        {entries, order}
+      else
+        case :queue.out(order) do
+          {{:value, oldest}, rest} -> {Map.delete(entries, oldest), rest}
+          {:empty, rest} -> {entries, rest}
+        end
+      end
+
+    Process.put(@cache_key, {Map.put(entries, text, width), :queue.in(text, order)})
+    width
   end
 end
