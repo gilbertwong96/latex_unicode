@@ -69,6 +69,37 @@ def deps do
 end
 ```
 
+## Development
+
+`mix ci` matches CI's checks, not its matrix:
+
+```text
+compile --all-warnings --warnings-as-errors
+format --check-formatted
+credo --strict          # includes the ExSlop AI-slop checks
+deps.unlock --check-unused
+hex.audit
+xref graph --label compile-connected --fail-above 5
+dialyzer
+ex_dna                  # duplicate code
+reach.check --dead-code --smells
+test --warnings-as-errors
+```
+
+CI's test job runs `mix compile`, `mix format` and `mix test` on Elixir 1.19/OTP 27,
+1.19/OTP 28 and 1.20/OTP 29. The quality job runs `mix ci` once on the newest pair,
+holds coverage at 91%, and caches Dialyzer's PLT against the lockfile.
+
+`mix ci.fast` is the inner loop: the list above without `deps.unlock
+--check-unused`, `hex.audit`, `xref graph --label compile-connected --fail-above 5`,
+`dialyzer`, `ex_dna` and `reach.check --dead-code --smells`.
+
+Elixir 1.19 is the floor, and the toolchain sets it rather than the library:
+`reach` needs 1.18, and the `ex_ast` it depends on needs 1.19. Everything is
+`dev`/`test` scoped with `runtime: false`, so a consumer's dependency tree stays
+empty — `reach` is also what provides `mix ex_ast.search`, `mix ex_ast.replace`
+and `mix ex_ast.diff`.
+
 ## Attribution
 
 This library is a port of pi-tui's LaTeX renderer and markdown tokenizers

@@ -8,3 +8,6 @@ erl_crash.dump
 *.beam
 /config/*.secret.exs
 .elixir_ls/
+
+# `mix reach` writes an HTML report here; `mix reach.check` does not.
+/reach_report/
