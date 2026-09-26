@@ -590,14 +590,18 @@ defmodule LatexUnicodeTest do
       assert LatexUnicode.render(
                "R\\left(\\frac{\\pi}{4}\\right)\n=\n\\begin{pmatrix}\n\\frac{\\sqrt{2}}{2} & -\\frac{\\sqrt{2}}{2}\\\\\n\\frac{\\sqrt{2}}{2} & \\frac{\\sqrt{2}}{2}\n\\end{pmatrix}.",
                display: true
-             ) == "   π\nR( ─ ) = ⎛ (√2)/2 │ -(√2)/2 ⎞\n   4     ⎝ (√2)/2 │ (√2)/2  ⎠."
+             ) == " ⎛ π⎞\nR⎜ ─⎟= ⎛ (√2)/2 │ -(√2)/2 ⎞\n ⎝ 4⎠  ⎝ (√2)/2 │ (√2)/2  ⎠."
+
+      # `\left(` sizes to the fraction here; pi leaves it a one-row `(`.
     end
 
     test "\\mathbf w\n=\nR\\left(\\frac{\\pi}{4}\\right)\n\\begin{pmatrix}1\\\\0\\end{pmatrix}\n=\n\\begin{pmatrix}\\frac{\\sqrt{2}}{2}\\\\\\frac{\\sqrt{2}}{2}\\end{pmatrix}." do
       assert LatexUnicode.render(
                "\\mathbf w\n=\nR\\left(\\frac{\\pi}{4}\\right)\n\\begin{pmatrix}1\\\\0\\end{pmatrix}\n=\n\\begin{pmatrix}\\frac{\\sqrt{2}}{2}\\\\\\frac{\\sqrt{2}}{2}\\end{pmatrix}.",
                display: true
-             ) == "       π\nw = R( ─ ) ⎛ 1 ⎞ = ⎛ (√2)/2 ⎞\n       4   ⎝ 0 ⎠   ⎝ (√2)/2 ⎠."
+             ) == "     ⎛ π⎞\nw = R⎜ ─⎟ ⎛ 1 ⎞ = ⎛ (√2)/2 ⎞\n     ⎝ 4⎠ ⎝ 0 ⎠   ⎝ (√2)/2 ⎠."
+
+      # `\left(` sizes to the fraction here; pi leaves it a one-row `(`.
     end
 
     test "A\\mathbf e_1=\\begin{pmatrix}\\pi\\\\0\\end{pmatrix},\\qquad A\\mathbf e_2=\\begin{pmatrix}0\\\\\\frac{1}{\\pi}\\end{pmatrix}." do
