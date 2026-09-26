@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Elixir ${{matrix.elixir}} / OTP ${{matrix.otp}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - elixir: "1.19"
+            otp: "27"
+          - elixir: "1.19"
+            otp: "28"
+          - elixir: "1.20"
+            otp: "29"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{matrix.elixir}}
+          otp-version: ${{matrix.otp}}
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix compile --all-warnings --warnings-as-errors
+      - run: mix test
+
+  quality:
+    runs-on: ubuntu-latest
+    name: Quality
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      # Dialyzer's PLT takes minutes to build from scratch, so it is cached
+      # against the toolchain and the lockfile. Casing on mix.lock means a
+      # dependency change rebuilds it rather than checking against a stale one.
+      - uses: actions/cache@v6
+        with:
+          path: _build/test/dialyxir_*.plt*
+          key: plt-${{runner.os}}-otp29-elixir1.20-${{hashFiles('mix.lock')}}
+
+      - run: mix deps.get
+      - run: mix ci
+
+      # The bar is held here rather than in mix.exs: measured, ExCoveralls exits
+      # 0 with `minimum_coverage` set above the actual total, and it has no
+      # `--min-coverage` switch to pass instead. The JSON it writes — what
+      # Codecov ingests — is kept as an artifact either way.
+      - name: Run tests with coverage
+        run: |
+          set -euo pipefail
+          mix coveralls.json | tee coveralls.txt
+          total=$(sed -n 's/^\[TOTAL\] *\([0-9.]*\)%.*/\1/p' coveralls.txt | tail -1)
+          test -n "$total"
+          echo "total coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { exit (t + 0 < 91) }'
+
+      # Codecov's own action rather than a curl uploader. An upload that fails
+      # only warns (fail_ci_if_error defaults to false), and continue-on-error is
+      # a second belt for the case that matters: a fork's pull request gets no
+      # secret at all. Nothing here gates the job — the JSON is kept as an
+      # artifact either way, and the number is held by the step above.
+      - name: Post coverage to Codecov
+        uses: codecov/codecov-action@v7
+        continue-on-error: true
+        with:
+          token: ${{secrets.CODECOV_TOKEN}}
+          files: ./cover/excoveralls.json
+          verbose: true
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-linux
+          path: cover/excoveralls.json
+          retention-days: 30
