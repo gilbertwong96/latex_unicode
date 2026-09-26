@@ -16,7 +16,7 @@ defmodule LatexUnicode do
   """
 
   alias LatexUnicode.Layout
-  alias LatexUnicode.Node.{Delimited, Fraction, Matrix, Operator, Script}
+  alias LatexUnicode.Node.{Braced, Delimited, Fraction, Matrix, Operator, Script, Stacked}
   alias LatexUnicode.Width
 
   defp visible_width(text), do: Width.display(text)
@@ -1097,29 +1097,26 @@ defmodule LatexUnicode do
     %Layout{lines: lines, width: width, baseline: length(numerator.lines)}
   end
 
-  defp layout_for_node(%Operator{} = node, _nodes) do
+  defp layout_for_node(%Operator{} = node, nodes) do
+    upper = if node.upper == nil, do: nil, else: render_layout(node.upper, nodes)
+    lower = if node.lower == nil, do: nil, else: render_layout(node.lower, nodes)
+
     content_width =
       Enum.max([
         visible_width(node.operator),
-        if(node.lower == nil, do: 0, else: visible_width(node.lower)),
-        if(node.upper == nil, do: 0, else: visible_width(node.upper))
+        if(upper == nil, do: 0, else: upper.width),
+        if(lower == nil, do: 0, else: lower.width)
       ])
 
     lines =
-      if(node.upper == nil,
-        do: [],
-        else: [pad_layout_line(node.upper, content_width, true) <> " "]
-      ) ++
+      limit_lines(upper, content_width) ++
         [pad_layout_line(node.operator, content_width, true) <> " "] ++
-        if(node.lower == nil,
-          do: [],
-          else: [pad_layout_line(node.lower, content_width, true) <> " "]
-        )
+        limit_lines(lower, content_width)
 
     %Layout{
       lines: lines,
       width: content_width + 1,
-      baseline: if(node.upper == nil, do: 0, else: 1)
+      baseline: if(upper == nil, do: 0, else: length(upper.lines))
     }
   end
 
@@ -1155,6 +1152,56 @@ defmodule LatexUnicode do
     }
   end
 
+  defp layout_for_node(%Stacked{} = node, nodes) do
+    lines =
+      node.lines
+      |> Enum.flat_map(fn line -> render_layout(line, nodes).lines end)
+      |> Enum.map(&String.trim/1)
+
+    width = lines |> Enum.map(&visible_width/1) |> Enum.max(fn -> 0 end)
+
+    %Layout{
+      lines: Enum.map(lines, &pad_layout_line(&1, width, true)),
+      width: width,
+      baseline: div(length(lines), 2)
+    }
+  end
+
+  defp layout_for_node(%Braced{} = node, nodes) do
+    body = render_layout(node.body, nodes)
+    label = if node.label == nil, do: [], else: render_layout(node.label, nodes).lines
+
+    width = Enum.max([body.width | Enum.map(label, &visible_width/1)])
+    brace = String.duplicate(if(node.kind == :over, do: "⏞", else: "⏟"), body.width)
+
+    brace_line = pad_layout_line(brace, width, true)
+    label_lines = Enum.map(label, &pad_layout_line(&1, width, true))
+    body_lines = Enum.map(body.lines, &pad_layout_line(&1, width, true))
+
+    above =
+      case {node.kind, node.label_side} do
+        {:over, :above} -> label_lines ++ [brace_line]
+        {:over, :below} -> [brace_line] ++ label_lines
+        {:over, nil} -> [brace_line]
+        {:under, :above} -> label_lines
+        _under -> []
+      end
+
+    below =
+      case {node.kind, node.label_side} do
+        {:under, :below} -> [brace_line] ++ label_lines
+        {:under, nil} -> [brace_line]
+        {:under, :above} -> [brace_line]
+        _over -> []
+      end
+
+    %Layout{
+      lines: above ++ body_lines ++ below,
+      width: width,
+      baseline: length(above) + body.baseline
+    }
+  end
+
   defp layout_for_node(%Delimited{} = node, nodes) do
     body = render_layout(node.body, nodes)
     height = max(node.height || length(body.lines), length(body.lines))
@@ -1175,6 +1222,14 @@ defmodule LatexUnicode do
       width: body.width + column_width(left) + column_width(right),
       baseline: baseline
     }
+  end
+
+  # A limit is a block, not a line: `\substack` under a sum is as many rows as it was
+  # written with, each of them centered under the operator.
+  defp limit_lines(nil, _content_width), do: []
+
+  defp limit_lines(layout, content_width) do
+    Enum.map(layout.lines, &(pad_layout_line(&1, content_width, true) <> " "))
   end
 
   # A delimiter's column for a block `height` rows tall: the character itself when
@@ -1609,6 +1664,12 @@ defmodule LatexUnicode do
         {value, p} = parse_required_argument(p)
         {String.trim(value) <> format_script(lower, :sub), p}
 
+      command == "substack" ->
+        substack(p)
+
+      command in ["overbrace", "underbrace"] ->
+        braced(p, command)
+
       MapSet.member?(@plain_wrappers, command) ->
         {value, p} = parse_required_argument(p)
 
@@ -1783,6 +1844,51 @@ defmodule LatexUnicode do
 
   defp split_environment_rows(body), do: Regex.split(@environment_row_pattern, body)
 
+  # `\hline` draws a rule: in front of a row, after it, or alone on a line — where it
+  # is not a cell but a rule between the rows around it. Each row therefore comes out of
+  # the body remembering whether a rule stands above it, and a rule after the last row
+  # gets a row of its own to be drawn on.
+  defp extract_rules(body) do
+    {rows, pending} =
+      body
+      |> split_environment_rows()
+      |> Enum.map(&strip_rules/1)
+      |> Enum.reduce({[], false}, fn {text, rule_before, rule_after}, {rows, pending} ->
+        {[{text, pending or rule_before} | rows], rule_after}
+      end)
+
+    rows = Enum.reverse(rows)
+    rows = if pending, do: rows ++ [{"", true}], else: rows
+
+    {Enum.map_join(rows, "\\\\", &elem(&1, 0)), Enum.map(rows, &elem(&1, 1))}
+  end
+
+  defp strip_rules(row) do
+    {row, before?} = strip_leading_rule(row)
+    {row, after?} = strip_trailing_rule(row)
+    {row, before?, after?}
+  end
+
+  defp strip_leading_rule(row) do
+    case Regex.run(~r/^\s*\\hline\b\s*/, row) do
+      [rule] -> {binary_part(row, byte_size(rule), byte_size(row) - byte_size(rule)), true}
+      nil -> {row, false}
+    end
+  end
+
+  defp strip_trailing_rule(row) do
+    case Regex.run(~r/\s*\\hline\s*$/, row) do
+      [rule] -> {binary_part(row, 0, byte_size(row) - byte_size(rule)), true}
+      nil -> {row, false}
+    end
+  end
+
+  # A rule runs the width of every column, and crosses the column separator where the
+  # rows do.
+  defp rule_line(column_widths) do
+    Enum.map_join(column_widths, "─┼─", &String.duplicate("─", &1))
+  end
+
   # `\left( … \right)`: pi reads the pair as plain text and leaves the delimiters
   # at their single-character size, which strands a stacked body with a one-row
   # delimiter and nothing at all beside its following lines. Finding the group first
@@ -1875,6 +1981,54 @@ defmodule LatexUnicode do
       end
 
     {name, position + max(byte_size(name), 1)}
+  end
+
+  # `\overbrace{a+b}^{n}` draws the brace across the body with `n` over it, so the
+  # script after the group is read here, the way an operator's limits are. Inline math
+  # has no row to draw a brace in, and there the command stays pi's wrapper with the
+  # script left where it is.
+  # `\substack{…}` stacks in display math; inline there is no column to stack in and
+  # the command stays the wrapper pi renders.
+  defp substack(p) do
+    {value, p} = parse_required_argument(p)
+
+    if p.display do
+      {index, p} = push_node(p, %Stacked{lines: String.split(value, "\n")})
+      {marker(index), p}
+    else
+      {String.trim(value), p}
+    end
+  end
+
+  defp braced(p, command) do
+    {value, p} = parse_required_argument(p)
+
+    if p.display do
+      {side, label, p} = parse_brace_label(p)
+      kind = if command == "overbrace", do: :over, else: :under
+
+      {index, p} =
+        push_node(p, %Braced{body: value, label: label, label_side: side, kind: kind})
+
+      {marker(index), p}
+    else
+      {String.trim(value), p}
+    end
+  end
+
+  # The `^`/`_` script that follows a group is the brace's label, and the marker says
+  # which side of the brace it goes: `\overbrace{a}^{n}` labels it above,
+  # `\overbrace{a}_{n}` below. The spaces in front of a script are skipped only when
+  # there is one.
+  defp parse_brace_label(p) do
+    case peek_script_marker(p) do
+      {nil, _peeked} ->
+        {nil, nil, p}
+
+      {marker, peeked} ->
+        {value, p} = parse_required_argument(advance(peeked, marker))
+        {if(marker == "^", do: :above, else: :below), value, p}
+    end
   end
 
   # pi's own reading of `\left`, `\middle` and `\right`: the command goes, and a `.`
@@ -2104,29 +2258,49 @@ defmodule LatexUnicode do
   end
 
   defp render_matrix(p, environment, body) do
+    {body, rules} = extract_rules(body)
     {matrix, p} = render_environment_cells(p, body)
 
-    matrix = Enum.reject(matrix, fn row -> not Enum.any?(row, &(&1 != "")) end)
-    column_count = matrix |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+    # A row of nothing but empty cells is spacing, unless it carried a rule.
+    matrix =
+      matrix
+      |> Enum.zip(rules)
+      |> Enum.reject(fn {row, ruled} -> not ruled and not Enum.any?(row, &(&1 != "")) end)
+
+    column_count =
+      matrix |> Enum.map(fn {row, _ruled} -> length(row) end) |> Enum.max(fn -> 0 end)
 
     # Rows are padded to the column count so the columns can be zipped instead
     # of indexed.
-    matrix = Enum.map(matrix, fn row -> row ++ List.duplicate("", column_count - length(row)) end)
+    matrix =
+      Enum.map(matrix, fn {row, ruled} ->
+        {row ++ List.duplicate("", column_count - length(row)), ruled}
+      end)
 
     column_widths =
       matrix
+      |> Enum.map(fn {row, _ruled} -> row end)
       |> Enum.zip()
       |> Enum.map(fn column ->
         column |> Tuple.to_list() |> Enum.map(&visible_width/1) |> Enum.max(fn -> 0 end)
       end)
 
+    rule = rule_line(column_widths)
+
     rows =
-      Enum.map(matrix, fn row ->
-        row
-        |> Enum.zip(column_widths)
-        |> Enum.map_join(" │ ", fn {cell, width} ->
-          cell <> String.duplicate(@protected_space, max(0, width - visible_width(cell)))
-        end)
+      Enum.flat_map(matrix, fn {row, ruled} ->
+        cells =
+          row
+          |> Enum.zip(column_widths)
+          |> Enum.map_join(" │ ", fn {cell, width} ->
+            cell <> String.duplicate(@protected_space, max(0, width - visible_width(cell)))
+          end)
+
+        cond do
+          ruled and Enum.all?(row, &(&1 == "")) -> [rule]
+          ruled -> [rule, cells]
+          true -> [cells]
+        end
       end)
 
     lines =
