@@ -6,13 +6,16 @@ installation, no image backend.
 
 ```elixir
 LatexUnicode.render("\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}")
-#=> nil (inline form is used unless you ask for display layout)
+#=> "(-b ± √(b² - 4ac))/(2a)"
 
 LatexUnicode.render("\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}", display: true)
 #=> "-b ± √(b² - 4ac)\n────────────────\n       2a"
 
-LatexUnicode.render("\\sum_{i=0}^n x_i")
-#=> "∑ᵢ₌₀ⁿ xᵢ"
+LatexUnicode.render("\\sum_{i=0}^n x_i", display: true)
+#=> " n\n ∑  xᵢ\ni=0"
+
+LatexUnicode.render("\\begin{pmatrix}1&200\\\\3000&4\\end{pmatrix}")
+#=> "⎛ 1    │ 200 ⎞\n⎝ 3000 │ 4   ⎠"
 
 LatexUnicode.render("x + \\unknown{y}")
 #=> nil      # unsupported or malformed: the caller falls back to the source
