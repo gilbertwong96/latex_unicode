@@ -1801,18 +1801,21 @@ defmodule LatexUnicode do
     end
   end
 
-  defp render_cases(p, body) do
-    {rows, p} =
-      body
-      |> split_environment_rows()
-      |> Enum.map_reduce(p, fn row, p ->
-        row
-        |> String.split("&")
-        |> Enum.map_reduce(p, fn cell, p ->
-          {rendered, p} = render_nested(p, cell, false)
-          {String.trim(rendered), p}
-        end)
+  defp render_environment_cells(p, body) do
+    body
+    |> split_environment_rows()
+    |> Enum.map_reduce(p, fn row, p ->
+      row
+      |> String.split("&")
+      |> Enum.map_reduce(p, fn cell, p ->
+        {rendered, p} = render_nested(p, cell, false)
+        {String.trim(rendered), p}
       end)
+    end)
+  end
+
+  defp render_cases(p, body) do
+    {rows, p} = render_environment_cells(p, body)
 
     # Each row is padded to `[value, condition | extra]` so the cells can be
     # destructured instead of indexed.
@@ -1882,17 +1885,7 @@ defmodule LatexUnicode do
   end
 
   defp render_matrix(p, environment, body) do
-    {matrix, p} =
-      body
-      |> split_environment_rows()
-      |> Enum.map_reduce(p, fn row, p ->
-        row
-        |> String.split("&")
-        |> Enum.map_reduce(p, fn cell, p ->
-          {rendered, p} = render_nested(p, cell, false)
-          {String.trim(rendered), p}
-        end)
-      end)
+    {matrix, p} = render_environment_cells(p, body)
 
     matrix = Enum.reject(matrix, fn row -> not Enum.any?(row, &(&1 != "")) end)
     column_count = matrix |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
