@@ -15,6 +15,8 @@ defmodule LatexUnicode do
   the markers into multi-line art.
   """
 
+  alias LatexUnicode.Layout
+  alias LatexUnicode.Node.{Fraction, Matrix, Operator, Script}
   alias LatexUnicode.Width
 
   defp visible_width(text), do: Width.display(text)
@@ -885,7 +887,7 @@ defmodule LatexUnicode do
   # matrix node in place).
   defp append_to_matrix(p, index, text) do
     case Map.get(p.nodes, index) do
-      %{type: :matrix, lines: lines} = node ->
+      %Matrix{lines: lines} = node ->
         last = length(lines) - 1
         updated = %{node | lines: List.update_at(lines, last, &(&1 <> text))}
         {updated, %{p | nodes: Map.put(p.nodes, index, updated)}}
@@ -904,7 +906,7 @@ defmodule LatexUnicode do
     String.duplicate(" ", left) <> line <> String.duplicate(" ", padding - left)
   end
 
-  defp join_layouts([]), do: %{lines: [""], width: 0, baseline: 0}
+  defp join_layouts([]), do: %Layout{lines: [""], width: 0, baseline: 0}
 
   defp join_layouts(layouts) do
     baseline = layouts |> Enum.map(& &1.baseline) |> Enum.max()
@@ -932,7 +934,7 @@ defmodule LatexUnicode do
       end)
 
     width = Enum.reduce(layouts, 0, fn layout, acc -> acc + layout.width end)
-    %{lines: lines, width: width, baseline: baseline}
+    %Layout{lines: lines, width: width, baseline: baseline}
   end
 
   defp render_layout(source, nodes) do
@@ -947,7 +949,7 @@ defmodule LatexUnicode do
     rendered_lines = Enum.flat_map(line_layouts, & &1.lines)
     width = Enum.reduce(rendered_lines, 0, fn line, acc -> max(acc, visible_width(line)) end)
 
-    %{lines: rendered_lines, width: width, baseline: first_baseline}
+    %Layout{lines: rendered_lines, width: width, baseline: first_baseline}
   end
 
   defp render_source_line(source_line, nodes) do
@@ -976,7 +978,7 @@ defmodule LatexUnicode do
           layouts
 
         text ->
-          [%{lines: [text], width: visible_width(text), baseline: 0} | layouts]
+          [%Layout{lines: [text], width: visible_width(text), baseline: 0} | layouts]
       end
 
     join_layouts(Enum.reverse(layouts))
@@ -987,7 +989,7 @@ defmodule LatexUnicode do
       sliced = binary_part(source_line, position, byte_size(source_line) - position)
       trimmed = if previous_node, do: String.trim_leading(sliced), else: sliced
 
-      if previous_node != nil and previous_node.type == :matrix and String.match?(sliced, ~r/^\s/) do
+      if match?(%Matrix{}, previous_node) and String.match?(sliced, ~r/^\s/) do
         " " <> trimmed
       else
         trimmed
@@ -1004,9 +1006,9 @@ defmodule LatexUnicode do
       trimmed = String.trim_trailing(leading_trimmed)
 
       preserve_leading =
-        previous_node != nil and previous_node.type == :matrix and String.match?(sliced, ~r/^\s/)
+        match?(%Matrix{}, previous_node) and String.match?(sliced, ~r/^\s/)
 
-      preserve_trailing = node.type == :matrix and String.match?(sliced, ~r/\s$/)
+      preserve_trailing = match?(%Matrix{}, node) and String.match?(sliced, ~r/\s$/)
 
       text =
         cond do
@@ -1021,13 +1023,13 @@ defmodule LatexUnicode do
             ""
         end
 
-      {[%{lines: [text], width: visible_width(text), baseline: 0} | layouts], index, node}
+      {[%Layout{lines: [text], width: visible_width(text), baseline: 0} | layouts], index, node}
     else
       {layouts, position, previous_node}
     end
   end
 
-  defp layout_for_node(%{type: :fraction} = node, nodes) do
+  defp layout_for_node(%Fraction{} = node, nodes) do
     numerator = render_layout(node.numerator, nodes)
     denominator = render_layout(node.denominator, nodes)
     content_width = Enum.max([numerator.width, denominator.width, 1])
@@ -1038,10 +1040,10 @@ defmodule LatexUnicode do
         [" " <> String.duplicate("─", content_width) <> " "] ++
         Enum.map(denominator.lines, &pad_layout_line(&1, width, true))
 
-    %{lines: lines, width: width, baseline: length(numerator.lines)}
+    %Layout{lines: lines, width: width, baseline: length(numerator.lines)}
   end
 
-  defp layout_for_node(%{type: :operator} = node, _nodes) do
+  defp layout_for_node(%Operator{} = node, _nodes) do
     content_width =
       Enum.max([
         visible_width(node.operator),
@@ -1060,10 +1062,14 @@ defmodule LatexUnicode do
           else: [pad_layout_line(node.lower, content_width, true) <> " "]
         )
 
-    %{lines: lines, width: content_width + 1, baseline: if(node.upper == nil, do: 0, else: 1)}
+    %Layout{
+      lines: lines,
+      width: content_width + 1,
+      baseline: if(node.upper == nil, do: 0, else: 1)
+    }
   end
 
-  defp layout_for_node(%{type: :script} = node, nodes) do
+  defp layout_for_node(%Script{} = node, nodes) do
     upper = if node.upper == nil, do: nil, else: render_layout(node.upper, nodes)
     lower = if node.lower == nil, do: nil, else: render_layout(node.lower, nodes)
 
@@ -1078,13 +1084,17 @@ defmodule LatexUnicode do
         [String.duplicate(" ", width)] ++
         if(lower == nil, do: [], else: Enum.map(lower.lines, &pad_layout_line(&1, width)))
 
-    %{lines: lines, width: width, baseline: if(upper == nil, do: 0, else: length(upper.lines))}
+    %Layout{
+      lines: lines,
+      width: width,
+      baseline: if(upper == nil, do: 0, else: length(upper.lines))
+    }
   end
 
-  defp layout_for_node(%{type: :matrix} = node, _nodes) do
+  defp layout_for_node(%Matrix{} = node, _nodes) do
     width = node.lines |> Enum.map(&visible_width/1) |> Enum.max(fn -> 0 end)
 
-    %{
+    %Layout{
       lines: Enum.map(node.lines, &pad_layout_line(&1, width)),
       width: width,
       baseline: node.baseline
@@ -1234,10 +1244,9 @@ defmodule LatexUnicode do
 
     if needs_layout do
       {index, p} =
-        push_node(p, %{
-          type: :script,
-          lower: if(sub == nil, do: nil, else: normalize_output(sub)),
-          upper: if(sup == nil, do: nil, else: normalize_output(sup))
+        push_node(p, %Script{
+          upper: if(sup == nil, do: nil, else: normalize_output(sup)),
+          lower: if(sub == nil, do: nil, else: normalize_output(sub))
         })
 
       {marker(index), p}
@@ -1402,8 +1411,7 @@ defmodule LatexUnicode do
 
         if should_stack do
           {index, p} =
-            push_node(p, %{
-              type: :fraction,
+            push_node(p, %Fraction{
               numerator: normalize_output(numerator),
               denominator: normalize_output(denominator)
             })
@@ -1537,7 +1545,7 @@ defmodule LatexUnicode do
 
     if p.display and use_display_limits and (lower != nil or upper != nil) do
       {index, p} =
-        push_node(p, %{type: :operator, operator: operator, lower: lower, upper: upper})
+        push_node(p, %Operator{operator: operator, lower: lower, upper: upper})
 
       {marker(index), p}
     else
@@ -1879,7 +1887,7 @@ defmodule LatexUnicode do
             if content == nil, do: delimiter, else: delimiter <> " " <> content
           end)
 
-        {index, p} = push_node(p, %{type: :matrix, lines: lines, baseline: middle})
+        {index, p} = push_node(p, %Matrix{lines: lines, baseline: middle})
         {marker(index), p}
     end
   end
@@ -1931,7 +1939,7 @@ defmodule LatexUnicode do
         {only, p}
 
       {:ok, lines} ->
-        {index, p} = push_node(p, %{type: :matrix, lines: lines, baseline: 0})
+        {index, p} = push_node(p, %Matrix{lines: lines, baseline: 0})
         {marker(index), p}
     end
   end
