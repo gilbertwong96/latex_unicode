@@ -16,7 +16,7 @@ defmodule LatexUnicode do
   """
 
   alias LatexUnicode.Layout
-  alias LatexUnicode.Node.{Fraction, Matrix, Operator, Script}
+  alias LatexUnicode.Node.{Delimited, Fraction, Matrix, Operator, Script}
   alias LatexUnicode.Width
 
   defp visible_width(text), do: Width.display(text)
@@ -46,6 +46,22 @@ defmodule LatexUnicode do
     "Bmatrix" => {"⎧", "⎫", "⎨", "⎬", "⎩", "⎭"},
     "vmatrix" => {"│", "│", "│", "│", "│", "│"},
     "Vmatrix" => {"║", "║", "║", "║", "║", "║"}
+  }
+
+  # How a delimiter `\left`, `\right` or a size command was given grows: its own
+  # single-character form, then the top, middle and bottom pieces of a taller one,
+  # which are the pieces the matrix environments draw with. A delimiter with no
+  # pieces of its own repeats its character down the column, which is what a
+  # stacked ⟨ or | wants.
+  @delimiter_pieces %{
+    "(" => {"(", "⎛", "⎜", "⎝"},
+    ")" => {")", "⎞", "⎟", "⎠"},
+    "[" => {"[", "⎡", "⎢", "⎣"},
+    "]" => {"]", "⎤", "⎥", "⎦"},
+    "{" => {"{", "⎧", "⎨", "⎩"},
+    "}" => {"}", "⎫", "⎬", "⎭"},
+    "|" => {"|", "│", "│", "│"},
+    "‖" => {"‖", "║", "║", "║"}
   }
 
   # --- tables (generated from pi-tui's latex.ts) ---
@@ -1139,6 +1155,55 @@ defmodule LatexUnicode do
     }
   end
 
+  defp layout_for_node(%Delimited{} = node, nodes) do
+    body = render_layout(node.body, nodes)
+    height = max(node.height || length(body.lines), length(body.lines))
+    baseline = if node.height, do: div(height, 2), else: body.baseline
+
+    left = delimiter_column(node.left, height)
+    right = delimiter_column(node.right, height)
+
+    lines =
+      [align_to_baseline(body.lines, baseline - body.baseline, height), left, right]
+      |> Enum.zip()
+      |> Enum.map(fn {line, left_piece, right_piece} ->
+        left_piece <> pad_layout_line(line, body.width) <> right_piece
+      end)
+
+    %Layout{
+      lines: lines,
+      width: body.width + column_width(left) + column_width(right),
+      baseline: baseline
+    }
+  end
+
+  # A delimiter's column for a block `height` rows tall: the character itself when
+  # one row is enough, then the pieces that stack — the middle one repeated as often
+  # as the height needs.
+  defp delimiter_column(nil, height), do: List.duplicate("", height)
+
+  defp delimiter_column(delimiter, height) do
+    {single, top, middle, bottom} =
+      Map.get(@delimiter_pieces, delimiter, {delimiter, delimiter, delimiter, delimiter})
+
+    case height do
+      1 -> [single]
+      2 -> [top, bottom]
+      _more -> [top | List.duplicate(middle, height - 2)] ++ [bottom]
+    end
+  end
+
+  defp column_width([piece | _rest]), do: visible_width(piece)
+  defp column_width([]), do: 0
+
+  # The body keeps its own baseline and the delimiters are drawn around it, so the
+  # rows outside the body belong to the delimiter's column alone.
+  defp align_to_baseline(lines, above, height) do
+    above = max(above, 0)
+    below = max(height - above - length(lines), 0)
+    List.duplicate("", above) ++ lines ++ List.duplicate("", below)
+  end
+
   # --- parser ---
 
   defp parse_sequence(p, end_char) do
@@ -1434,13 +1499,13 @@ defmodule LatexUnicode do
         {@named_operator_start <> command <> @named_operator_end, p}
 
       MapSet.member?(@size_commands, command) ->
-        {"", p}
+        sized_delimiter(p, command)
 
-      command in ["left", "middle", "right"] ->
-        case cp_at(p) do
-          "." -> {"", advance(p, ".")}
-          _ -> {"", p}
-        end
+      command == "left" ->
+        left_right_group(p)
+
+      command in ["middle", "right"] ->
+        unsized_delimiters(p)
 
       command in ["frac", "dfrac", "tfrac"] ->
         should_stack = p.display and p.stack_fractions and command != "tfrac"
@@ -1717,6 +1782,113 @@ defmodule LatexUnicode do
   end
 
   defp split_environment_rows(body), do: Regex.split(@environment_row_pattern, body)
+
+  # `\left( … \right)`: pi reads the pair as plain text and leaves the delimiters
+  # at their single-character size, which strands a stacked body with a one-row
+  # delimiter and nothing at all beside its following lines. Finding the group first
+  # lets the display pass size them to the body instead.
+  # Inline math has one line to work with and an unclosed group has nothing to size
+  # against, so both keep pi's handling.
+  defp left_right_group(%{display: false} = p), do: unsized_delimiters(p)
+
+  defp left_right_group(p) do
+    case find_right_delimiter(p.source, p.pos) do
+      nil ->
+        unsized_delimiters(p)
+
+      {right_command, right_delimiter} ->
+        {left, p} = parse_required_argument_value(p)
+        body_start = p.pos
+        {right, p} = parse_required_argument_value(%{p | pos: right_delimiter})
+
+        body = binary_part(p.source, body_start, right_command - body_start)
+        {rendered, p} = render_nested(p, body, true)
+
+        {index, p} =
+          push_node(p, %Delimited{
+            left: invisible_delimiter(left),
+            body: rendered,
+            right: invisible_delimiter(right)
+          })
+
+        {marker(index), p}
+    end
+  end
+
+  # A `\big(` and its relatives ask for a delimiter one size up. A terminal has
+  # two sizes above the ordinary one — two rows for `\big` and `\Big`, three for
+  # `\bigg` and `\Bigg` — and inline math has nowhere to grow, where pi drops the
+  # command and this does too.
+  defp sized_delimiter(%{display: false} = p, _command), do: {"", p}
+
+  defp sized_delimiter(p, command) do
+    case cp_at(p) do
+      nil ->
+        {"", p}
+
+      _delimiter ->
+        {delimiter, p} = parse_required_argument_value(p)
+        height = if String.contains?(command, "gg"), do: 3, else: 2
+
+        {index, p} =
+          push_node(p, %Delimited{left: delimiter, body: "", right: nil, height: height})
+
+        {marker(index), p}
+    end
+  end
+
+  # The `\right` closing a `\left`: where the command begins, so the body can end
+  # there, and where its delimiter begins, so it can be read as one. The `\left`s in
+  # between are matched by nesting, and nil means the group is never closed.
+  defp find_right_delimiter(source, position), do: find_right_delimiter(source, position, 0)
+
+  defp find_right_delimiter(source, position, depth) do
+    case :binary.match(source, "\\", scope: {position, byte_size(source) - position}) do
+      :nomatch ->
+        nil
+
+      {start, 1} ->
+        {name, next} = command_name_at(source, start + 1)
+
+        cond do
+          name == "left" -> find_right_delimiter(source, next, depth + 1)
+          name == "right" and depth > 0 -> find_right_delimiter(source, next, depth - 1)
+          name == "right" -> {start, next}
+          true -> find_right_delimiter(source, next, depth)
+        end
+    end
+  end
+
+  # The command name at `position` and where it ends: a run of letters, or the one
+  # character of an escaped `\\` or `\{`, which is what keeps a doubled backslash
+  # from being read as a command.
+  defp command_name_at(source, position) do
+    rest = binary_part(source, position, byte_size(source) - position)
+
+    name =
+      case rest do
+        <<byte, _rest::binary>> when byte in ?a..?z or byte in ?A..?Z ->
+          rest |> String.split(~r/[^A-Za-z]/, parts: 2) |> hd()
+
+        _other ->
+          ""
+      end
+
+    {name, position + max(byte_size(name), 1)}
+  end
+
+  # pi's own reading of `\left`, `\middle` and `\right`: the command goes, and a `.`
+  # with it, while the delimiter itself is left to be read as the text it looks like.
+  defp unsized_delimiters(p) do
+    case cp_at(p) do
+      "." -> {"", advance(p, ".")}
+      _ -> {"", p}
+    end
+  end
+
+  # A `\right.` draws nothing at all.
+  defp invisible_delimiter("."), do: nil
+  defp invisible_delimiter(delimiter), do: delimiter
 
   defp parse_environment(p) do
     case read_raw_group(p) do
@@ -2011,9 +2183,9 @@ defmodule LatexUnicode do
     {rendered, inner} = parse_sequence(inner, nil)
 
     if inner.supported and inner.pos == byte_size(source) do
-      {normalize_output(rendered), %{p | nodes: inner.nodes}}
+      {normalize_output(rendered), %{p | nodes: inner.nodes, node_count: inner.node_count}}
     else
-      {source, %{p | supported: false, nodes: inner.nodes}}
+      {source, %{p | supported: false, nodes: inner.nodes, node_count: inner.node_count}}
     end
   end
 end
