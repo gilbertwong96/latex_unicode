@@ -320,6 +320,33 @@ defmodule LatexUnicode do
     "Z" => "ℤ"
   }
 
+  # The letterlike part of the script and black-letter alphabets, which is what
+  # `\mathcal`/`\mathscr` and `\mathfrak` ask for and a monospace font has to draw
+  # with. The rest of each alphabet is in the Mathematical Alphanumeric Symbols
+  # block (U+1D49C onward), where most terminal fonts have nothing, so those
+  # letters are left as they are — the same choice `@blackboard` already makes.
+  @script %{
+    "B" => "ℬ",
+    "E" => "ℰ",
+    "F" => "ℱ",
+    "H" => "ℋ",
+    "I" => "ℐ",
+    "L" => "ℒ",
+    "M" => "ℳ",
+    "R" => "ℛ",
+    "e" => "ℯ",
+    "g" => "ℊ",
+    "o" => "ℴ"
+  }
+
+  @fraktur %{
+    "C" => "ℭ",
+    "H" => "ℌ",
+    "I" => "ℑ",
+    "R" => "ℜ",
+    "Z" => "ℨ"
+  }
+
   @superscripts %{
     "0" => "⁰",
     "1" => "¹",
@@ -752,6 +779,17 @@ defmodule LatexUnicode do
   defp whitespace?(cp), do: Regex.match?(~r/^\s$/u, cp)
   defp letter?(cp), do: Regex.match?(~r/^[A-Za-z]$/, cp)
   defp space_or_tab?(cp), do: cp in [" ", "\t"]
+
+  # Unlike replace_characters/2, a character the alphabet has no codepoint for
+  # keeps its own, which is pi's `BLACKBOARD[character] ?? character`.
+  defp map_characters(value, alphabet) do
+    value
+    |> String.to_charlist()
+    |> Enum.map_join(fn character ->
+      character = <<character::utf8>>
+      Map.get(alphabet, character, character)
+    end)
+  end
 
   defp replace_characters(value, replacements) do
     replace_characters(value, replacements, [])
@@ -1454,16 +1492,17 @@ defmodule LatexUnicode do
 
       command == "mathbb" ->
         {value, p} = parse_required_argument(p)
+        {map_characters(value, @blackboard), p}
 
-        rendered =
-          value
-          |> String.to_charlist()
-          |> Enum.map_join(fn char ->
-            char = <<char::utf8>>
-            Map.get(@blackboard, char, char)
-          end)
+      # pi renders these three as plain wrappers; the letterlike codepoints are
+      # what a terminal can draw them with.
+      command in ["mathcal", "mathscr"] ->
+        {value, p} = parse_required_argument(p)
+        {map_characters(value, @script), p}
 
-        {rendered, p}
+      command == "mathfrak" ->
+        {value, p} = parse_required_argument(p)
+        {map_characters(value, @fraktur), p}
 
       command == "operatorname" ->
         {starred, p} =
