@@ -51,10 +51,15 @@ jobs:
       - run: mix deps.get
       - run: mix ci
 
-      # The bar is held here rather than in mix.exs: measured, ExCoveralls exits
-      # 0 with `minimum_coverage` set above the actual total, and it has no
-      # `--min-coverage` switch to pass instead. The JSON it writes — what
-      # Codecov ingests — is kept as an artifact either way.
+      # The docs are built here too, in the dev environment `mix ci` cannot use: ex_doc
+      # is a dev-only dependency, and a `@doc` that does not compile or an `extras:`
+      # entry that no longer exists is otherwise not seen until publish time.
+      - run: mix docs --warnings-as-errors
+
+      # The bar that bites is the check at the end of this step, not the keys in
+      # mix.exs: measured, `mix coveralls.json` does not enforce `minimum_coverage`, and
+      # ExCoveralls' `threshold` does not fire under its own tool. The JSON this writes
+      # — what Codecov ingests — is kept as an artifact either way.
       - name: Run tests with coverage
         run: |
           set -euo pipefail
@@ -62,7 +67,7 @@ jobs:
           total=$(sed -n 's/^\[TOTAL\] *\([0-9.]*\)%.*/\1/p' coveralls.txt | tail -1)
           test -n "$total"
           echo "total coverage: ${total}%"
-          awk -v t="$total" 'BEGIN { exit (t + 0 < 91) }'
+          awk -v t="$total" 'BEGIN { exit (t + 0 < 93) }'
 
       # Codecov's own action rather than a curl uploader. An upload that fails
       # only warns (fail_ci_if_error defaults to false), and continue-on-error is
