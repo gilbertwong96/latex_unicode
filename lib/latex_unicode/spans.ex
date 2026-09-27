@@ -92,9 +92,8 @@ defmodule LatexUnicode.Spans do
 
   # --- fenced code blocks ---
 
-  @doc false
   @spec fenced_ranges(String.t()) :: [{non_neg_integer(), non_neg_integer()}]
-  def fenced_ranges(source) do
+  defp fenced_ranges(source) do
     {ranges, open, _offset} =
       source
       |> String.split("\n")
