@@ -9,16 +9,16 @@ defmodule Mix.Tasks.LatexUnicode.Render do
   characters it was written with — so a page that wants its math drawn has it rendered
   first, and the rendered copy is what goes in `extras`:
 
-      mix latex_unicode.render guides/flow.md
-      # => guides/flow.rendered.md
+      mix latex_unicode.render guides/math-in-docs.md
+      # => guides/math-in-docs.rendered.md
 
       # mix.exs
-      docs: [extras: ["guides/flow.rendered.md"]]
+      docs: [extras: ["guides/math-in-docs.rendered.md"]]
 
   `--check` writes nothing and fails when a committed page no longer matches its
   source, which is how a project keeps the two from drifting apart:
 
-      mix latex_unicode.render --check guides/flow.md
+      mix latex_unicode.render --check guides/math-in-docs.md
 
   API documentation takes the other route, because `@doc` takes any expression:
   render the string where it is written and there is nothing to keep in step.
@@ -46,7 +46,7 @@ defmodule Mix.Tasks.LatexUnicode.Render do
   end
 
   defp render(file, options) do
-    rendered = file |> File.read!() |> LatexUnicode.Spans.render()
+    rendered = file |> source() |> LatexUnicode.Spans.render()
     output = rendered_path(file)
 
     if options[:check] do
@@ -70,7 +70,16 @@ defmodule Mix.Tasks.LatexUnicode.Render do
     end
   end
 
-  # guides/flow.md -> guides/flow.rendered.md
+  # A path that does not exist is the reader's own typo far more often than a bug here,
+  # so it gets a sentence rather than a `File.Error` and a stack trace.
+  defp source(file) do
+    case File.read(file) do
+      {:ok, source} -> source
+      {:error, reason} -> Mix.raise("could not read #{file}: #{:file.format_error(reason)}")
+    end
+  end
+
+  # guides/math-in-docs.md -> guides/math-in-docs.rendered.md
   defp rendered_path(file) do
     Path.rootname(file) <> ".rendered" <> Path.extname(file)
   end

@@ -56,12 +56,14 @@ defmodule LatexUnicode.MixProject do
       "ci.fast": [
         "cmd mix compile --all-warnings --warnings-as-errors",
         "format --check-formatted",
+        "latex_unicode.render --check guides/math-in-docs.md",
         "credo --strict",
         "test --warnings-as-errors"
       ],
       ci: [
         "cmd mix compile --all-warnings --warnings-as-errors",
         "format --check-formatted",
+        "latex_unicode.render --check guides/math-in-docs.md",
         "credo --strict",
         "deps.unlock --check-unused",
         "cmd mix hex.audit",
