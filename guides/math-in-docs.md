@@ -28,8 +28,10 @@ Two backslashes, because the string is Elixir before it is LaTeX: `\\pi` is the
 A guide is a file, and a project hands it to ExDoc through `extras:`. Render the math
 first, then point ExDoc at the rendered copy:
 
-    mix latex_unicode.render guides/math-in-docs.md
-    # => guides/math-in-docs.rendered.md
+```console
+mix latex_unicode.render guides/math-in-docs.md
+# => guides/math-in-docs.rendered.md
+```
 
 ```elixir
 docs: [extras: ["guides/math-in-docs.rendered.md"]]
@@ -40,7 +42,9 @@ reading. `mix ci` runs the check that follows, so the two cannot drift apart unn
 
 `--check` writes nothing and fails when a committed page no longer matches its source:
 
-    mix latex_unicode.render --check guides/math-in-docs.md
+```console
+mix latex_unicode.render --check guides/math-in-docs.md
+```
 
 ## A formula, drawn
 
@@ -58,7 +62,7 @@ for a right triangle.
 Math inside a fenced code block is kept as written, which is where an example of source
 math belongs:
 
-```
+```text
 $e^{i\pi} + 1 = 0$
 ```
 

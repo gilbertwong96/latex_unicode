@@ -1,7 +1,11 @@
 defmodule LatexUnicode do
   @moduledoc """
-  LaTeX math rendering for the transcript, mirroring pi-tui's `renderLatex`
+  LaTeX math as terminal-friendly Unicode text: for terminals, code comments, log output,
+  and anywhere rich formatting is not available — mirroring pi-tui's `renderLatex`
   (`packages/tui/src/latex.ts`).
+
+  Math inside markdown goes through `LatexUnicode.Spans`, which renders the spans in the
+  text itself and fences display math for the parser that will read it.
 
   A recursive-descent parser over the math subset pi supports: symbols, scripts,
   fractions, roots, accents, named operators, environments (`aligned`, `cases`,
