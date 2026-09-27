@@ -3,16 +3,34 @@ defmodule LatexUnicode do
   LaTeX math rendering for the transcript, mirroring pi-tui's `renderLatex`
   (`packages/tui/src/latex.ts`).
 
-  A recursive-descent parser over the math subset pi supports: symbols,
-  scripts, fractions, roots, accents, named operators, environments
-  (`aligned`, `cases`, `pmatrix`, ...) and display-mode stacking. The output is
-  terminal-friendly Unicode; `nil` means "unsupported or malformed", and the
-  caller falls back to the raw source (pi renders the raw token too).
+  A recursive-descent parser over the math subset pi supports: symbols, scripts,
+  fractions, roots, accents, named operators, environments (`aligned`, `cases`,
+  `pmatrix`, ...) and display-mode stacking. Beyond that subset it takes on what pi
+  leaves as text: `\\left … \\right` and the size commands grow their delimiters to
+  the body, `\\mathcal`/`\\mathfrak`/`\\mathscr` take the letterlike letters,
+  `\\substack` stacks, `\\overbrace`/`\\underbrace` draw their brace, and `\\hline`
+  rules an array.
 
-  Display layout uses pi's marker scheme: fractions, stacked operator limits,
-  stacked scripts and matrices push a layout node and leave a
-  `\\u{F0000}<index>\\u{F0001}` marker in the text; the layout pass then expands
-  the markers into multi-line art.
+  ## How an expression comes out
+
+  Inline math is one line, and it is pi's rendering character for character: a
+  fraction is `a/b`, a script is a Unicode superscript or subscript (`x^2` is `x²`),
+  and one with no such form is written out (`e^{x_1}` is `e^(x₁)`).
+
+  Display math (`display: true`) is the multi-line art: fractions, operator limits,
+  matrices and nested scripts stack, and delimiters grow. Which of the two a script
+  goes through does not depend on its length — a value that can be written in Unicode
+  as it stands is substituted in either mode, so `e^{-x}` is `e⁻ˣ` both ways, while a
+  script containing another script has nothing to be substituted into and is stacked:
+  `e^{-x^2}` is three lines as display math and `e^(-x²)` inline.
+
+  Anything unsupported or malformed — a command outside the subset, an unclosed
+  group, an environment that never ends — renders `nil` rather than a partial result,
+  and the caller keeps the source text (pi renders the raw token too).
+
+  Display layout uses pi's marker scheme: every piece that needs stacking pushes a
+  layout node and leaves a `\\u{F0000}<index>\\u{F0001}` marker in the text; the layout
+  pass then expands the markers into multi-line art.
   """
 
   alias LatexUnicode.Layout
@@ -712,18 +730,24 @@ defmodule LatexUnicode do
 
   # --- api ---
 
-  @typedoc "Rendering options: `display: true` stacks fractions and operator limits."
+  @typedoc """
+  Rendering options: `display: true` lays math out for display — stacked fractions,
+  limits and nested scripts, with delimiters sized to what they wrap.
+  """
   @type options :: [display: boolean()]
 
   @doc """
-  Render `source` as terminal-friendly Unicode math, or `nil` when the
-  expression is unsupported or malformed (the caller falls back to the raw
-  source, like pi).
+  Render `source` as terminal-friendly Unicode math, or `nil` when the expression is
+  unsupported or malformed (the caller falls back to the raw source, like pi).
 
   ## Options
 
-    * `:display` — stack fractions and operator limits vertically for display
-      math (default false, pi's `RenderLatexOptions.display`)
+    * `:display` — lay math out for display rather than inline (default false, pi's
+      `RenderLatexOptions.display`): fractions, operator limits and nested scripts
+      stack, `\\left … \\right` and the size commands grow their delimiters, and
+      `\\substack`, `\\overbrace` and `\\underbrace` get the rows they need. An
+      expression that needs none of that renders the same either way — `e^{-x}` is
+      `e⁻ˣ` in both — while `e^{-x^2}` is three lines here and `e^(-x²)` inline.
   """
   @spec render(String.t(), options()) :: String.t() | nil
   def render(source, opts \\ []) do
