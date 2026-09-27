@@ -12,6 +12,8 @@ defmodule LatexUnicode.Width.EastAsianWidth do
   `eastAsianWidth` counts only Wide and Fullwidth as two columns.
   """
 
+  alias LatexUnicode.Width.Ranges
+
   @wide List.to_tuple([
           0x1100,
           0x115F,
@@ -284,28 +286,8 @@ defmodule LatexUnicode.Width.EastAsianWidth do
   end
 
   defp fullwidth?(codepoint) when codepoint < 0x3000 or codepoint > 0xFFE6, do: false
-  defp fullwidth?(codepoint), do: in_ranges?(@fullwidth, codepoint)
+  defp fullwidth?(codepoint), do: Ranges.member?(@fullwidth, codepoint)
 
   defp wide?(codepoint) when codepoint < 0x1100 or codepoint > 0x3FFFD, do: false
-  defp wide?(codepoint), do: in_ranges?(@wide, codepoint)
-
-  # Binary search over the flattened inclusive pairs, as pi's `isInRange`, over
-  # tuples so each probe is a constant-time lookup.
-  defp in_ranges?(ranges, codepoint) do
-    search(ranges, codepoint, 0, div(tuple_size(ranges), 2) - 1)
-  end
-
-  defp search(_ranges, _codepoint, low, high) when low > high, do: false
-
-  defp search(ranges, codepoint, low, high) do
-    middle = div(low + high, 2)
-    first = elem(ranges, middle * 2)
-    last = elem(ranges, middle * 2 + 1)
-
-    cond do
-      codepoint < first -> search(ranges, codepoint, low, middle - 1)
-      codepoint > last -> search(ranges, codepoint, middle + 1, high)
-      true -> true
-    end
-  end
+  defp wide?(codepoint), do: Ranges.member?(@wide, codepoint)
 end
