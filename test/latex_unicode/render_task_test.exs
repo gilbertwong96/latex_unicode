@@ -26,6 +26,15 @@ defmodule LatexUnicode.RenderTaskTest do
              "The identity e^(iπ) + 1 = 0 holds.\n"
   end
 
+  test "fences display math, which a parser would otherwise reflow", %{directory: directory} do
+    source = Path.join(directory, "page.md")
+    File.write!(source, "$$\\frac{1}{2}$$\n")
+
+    capture_io(fn -> render([source]) end)
+
+    assert File.read!(Path.join(directory, "page.rendered.md")) == "```text\n1\n─\n2\n```\n"
+  end
+
   test "--check passes while the two are in step", %{directory: directory} do
     source = Path.join(directory, "page.md")
     File.write!(source, "The area is $a^2 + b^2 = c^2$.\n")
