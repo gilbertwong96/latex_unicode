@@ -22,6 +22,9 @@ defmodule LatexUnicode.MixProject do
       # above the actual total.
       test_coverage: [tool: ExCoveralls],
       aliases: aliases(),
+      # `Mix.raise/1` and `Mix.shell/0` are in the mix task, which Dialyzer knows nothing
+      # about unless the application is in the PLT.
+      dialyzer: [plt_add_apps: [:mix]],
       description: description(),
       package: package(),
       docs: docs(),
@@ -96,14 +99,19 @@ defmodule LatexUnicode.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE)
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE guides)
     ]
   end
 
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "CHANGELOG.md", {"LICENSE", title: "License"}]
+      extras: [
+        "README.md",
+        {"guides/math-in-docs.rendered.md", title: "Math in docs"},
+        "CHANGELOG.md",
+        {"LICENSE", title: "License"}
+      ]
     ]
   end
 end
