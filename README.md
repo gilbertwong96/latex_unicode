@@ -56,8 +56,21 @@ binomials, `\text`/`\mathbf`/`\mathbb`/font switches, accents and wide decoratio
 `\boxed`, `\operatorname`, `\overset`/`\underset`, environments (`aligned`,
 `alignedat`, `gather`, `split`, `cases`, `array`, `matrix`, `pmatrix`, `bmatrix`,
 `Bmatrix`, `vmatrix`, `Vmatrix`), spacing commands, and display-mode layout that
-stacks fractions, operator limits, stacked scripts, and matrices into multi-line
+stacks fractions, operator limits, nested scripts, and matrices into multi-line
 art.
+
+Beyond pi's subset: `\left … \right` and the size commands (`\big` … `\Bigg`) grow
+their delimiters to the body, `\mathcal`/`\mathfrak`/`\mathscr` take the letterlike
+letters (`\mathbb` takes the blackboard ones, as in pi), `\substack` stacks,
+`\overbrace`/`\underbrace` draw their brace with the label on the side its script
+asks for, and `\hline` rules an array or matrix.
+
+Inline math is pi's rendering character for character — `a/b` for a fraction, `x²`
+for a script, `e^(x₁)` where Unicode has no script form — and display math is the
+multi-line art. `e^{-x}` is `e⁻ˣ` either way; `e^{-x^2}` is three lines as display
+math, because a script inside a script has no Unicode form to nest in.
+
+`examples/rendering.txt` is all of this rendered, ready to `cat` in a terminal.
 
 Unsupported commands, malformed groups, and unbalanced environments return `nil`.
 
