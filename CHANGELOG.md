@@ -4,7 +4,11 @@ Notable changes to this project, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.1.0 — unreleased
+## [Unreleased]
+
+Nothing yet.
+
+## [0.1.0] - 2026-09-27
 
 First release. LaTeX math rendered as terminal-friendly Unicode text: inline math as one
 line, display math as multi-line art, and a pass that puts either into markdown before a

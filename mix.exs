@@ -123,6 +123,9 @@ defmodule LatexUnicode.MixProject do
   defp docs do
     [
       main: "readme",
+      # Source links on hexdocs point at the tag the docs were built from, the way
+      # amap does it, rather than at whatever the default branch says today.
+      source_ref: "v#{@version}",
       extras: [
         "README.md",
         {"guides/math-in-docs.rendered.md", title: "Math in docs"},

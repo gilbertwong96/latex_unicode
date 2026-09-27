@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/gilbertwong96/latex_unicode/actions/workflows/ci.yml/badge.svg)](https://github.com/gilbertwong96/latex_unicode/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/gilbertwong96/latex_unicode/graph/badge.svg)](https://codecov.io/gh/gilbertwong96/latex_unicode)
+[![Hex.pm](https://img.shields.io/hexpm/v/latex_unicode.svg)](https://hex.pm/packages/latex_unicode)
+[![Hexdocs](https://img.shields.io/badge/hexdocs-docs-blue.svg)](https://hexdocs.pm/latex_unicode)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Render LaTeX math as Unicode text — for terminals, code comments, log output, and
