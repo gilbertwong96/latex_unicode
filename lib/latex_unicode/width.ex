@@ -13,6 +13,7 @@ defmodule LatexUnicode.Width do
   """
 
   alias LatexUnicode.Width.EastAsianWidth
+  alias LatexUnicode.Width.Emoji
 
   # pi bounds its width cache at 512 strings and drops the oldest; the same bound
   # keeps a long session's measurements from growing without limit.
@@ -35,8 +36,6 @@ defmodule LatexUnicode.Width do
   # `PropList.txt` calls `Other_Default_Ignorable_Code_Point`, which is all the derived
   # property adds to the categories below it — 3773 of the set's 6477 codepoints.
   @non_printing ~r/^[\x{034F}\x{115F}-\x{1160}\x{17B4}-\x{17B5}\x{2065}\x{3164}\x{FFA0}\x{FFF0}-\x{FFF8}\x{E0000}\x{E0002}-\x{E001F}\x{E0080}-\x{E00FF}\x{E01F0}-\x{E0FFF}\p{Cc}\p{Cf}\p{Cs}\p{Mn}\p{Mc}\p{Me}]$/u
-  @emoji_presentation ~r/^[\p{Emoji_Presentation}]$/u
-  @extended_pictographic ~r/^[\p{Extended_Pictographic}]$/u
 
   # pi's `terminalSpacingMarkRegex`: spacing marks take a cell of their own, less
   # the three that do not, plus the non-spacing exceptions legacy wcwidth tables
@@ -175,16 +174,17 @@ defmodule LatexUnicode.Width do
     end
   end
 
-  # pi asks `\p{RGI_Emoji}` of the whole cluster, which Erlang's `re` does not
-  # have. The codepoint properties it does have answer the same for every cluster
-  # the terminal shows as an emoji: a codepoint that presents as one by default, a
-  # flag, or a pictograph with a variation selector forcing emoji presentation —
-  # which is also what makes a keycap an emoji, since `1` is not one on its own.
+  # pi asks `\p{RGI_Emoji}` of the whole cluster, which Erlang's `re` has nowhere. The
+  # two codepoint properties that answer for it instead are ported as data in `Emoji`,
+  # because OTP 27's PCRE rejects their names: a codepoint that presents as an emoji by
+  # default, a flag, or a pictograph with a variation selector forcing emoji
+  # presentation — which is also what makes a keycap an emoji, since `1` is not one on
+  # its own.
   defp emoji?(base, codepoints) do
     cond do
-      emoji_presentation?(base) -> true
+      Emoji.presentation?(base) -> true
       base in 0x1F1E6..0x1F1FF -> true
-      0xFE0F in codepoints -> extended_pictographic?(base) or 0x20E3 in codepoints
+      0xFE0F in codepoints -> Emoji.pictographic?(base) or 0x20E3 in codepoints
       true -> false
     end
   end
@@ -196,8 +196,6 @@ defmodule LatexUnicode.Width do
 
   defp mark?(codepoint), do: matches?(@mark, codepoint)
   defp non_printing?(codepoint), do: matches?(@non_printing, codepoint)
-  defp emoji_presentation?(codepoint), do: matches?(@emoji_presentation, codepoint)
-  defp extended_pictographic?(codepoint), do: matches?(@extended_pictographic, codepoint)
 
   defp matches?(regex, codepoint), do: Regex.match?(regex, <<codepoint::utf8>>)
 
