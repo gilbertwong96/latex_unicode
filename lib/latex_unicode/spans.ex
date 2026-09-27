@@ -40,34 +40,39 @@ defmodule LatexUnicode.Spans do
 
     * `:render_latex` — render math spans (default true, pi's
       `MarkdownOptions.renderLatex`); false keeps the span's source text
+    * `:fence` — put display math in a fenced code block (default false), for text a
+      markdown parser will read; `render/2` turns it on
   """
   @spec extract(String.t(), keyword()) :: {String.t(), spans()}
   def extract(source, opts \\ []) do
     render? = Keyword.get(opts, :render_latex, true)
+    fence? = Keyword.get(opts, :fence, false)
 
-    {source, spans} = extract_blocks(source, fenced_ranges(source), render?, %{})
+    {source, spans} = extract_blocks(source, fenced_ranges(source), {render?, fence?}, %{})
     {source, spans} = extract_inlines(source, render?, spans)
 
     {source, spans}
   end
 
   @doc """
-  Render the math spans in `source` in place, for text that no markdown parser runs
-  over in between.
-
-  `extract/2` and `substitute/2` are two halves because a markdown parser has to see
-  the source between them; when there is no parser — a plain text file, a log line, a
-  help message, a doc string — this does both in one call and leaves the text's own
+  Render the math spans in `source` in place, in one call, leaving the text's own
   line breaks alone, the last newline included.
 
       iex> LatexUnicode.Spans.render("the identity $e^{i\\\\pi} + 1 = 0$ holds")
       "the identity e^(iπ) + 1 = 0 holds"
 
+  Display math renders to art, and the rows of it lean on their indentation and on
+  line breaks — which a markdown parser keeps only inside a fenced block: without
+  one, the denominator of a fraction is read as a code block of its own and the
+  numerator folds into the paragraph above it. So display spans are fenced here,
+  which is what a doc string or a guide page needs. Pass `fence: false` for text no
+  parser runs over afterwards, such as a log line or a help message.
+
   The options are `extract/2`'s: `render_latex: false` leaves every span as written.
   """
   @spec render(String.t(), keyword()) :: String.t()
   def render(source, opts \\ []) do
-    {source, spans} = extract(source, opts)
+    {source, spans} = extract(source, Keyword.put_new(opts, :fence, true))
 
     source
     |> String.split("\n", trim: false)
@@ -130,7 +135,7 @@ defmodule LatexUnicode.Spans do
 
   # --- block spans ---
 
-  defp extract_blocks(source, fenced, render?, spans) do
+  defp extract_blocks(source, fenced, options, spans) do
     matches = block_matches(source, fenced)
     matches = Enum.sort_by(matches, &elem(&1, 0))
 
@@ -140,16 +145,7 @@ defmodule LatexUnicode.Spans do
         text = String.trim(binary_part(source, text_start, text_length))
         raw = String.trim(binary_part(source, start, length))
 
-        replacement =
-          if render? do
-            case LatexUnicode.render(text, display: true) do
-              nil -> raw
-              rendered -> rendered
-            end
-          else
-            raw
-          end
-
+        replacement = block_replacement(text, raw, options)
         {placeholder, spans} = put_span(spans, replacement)
         prefix = binary_part(source, last_end, start - last_end)
         {[placeholder, prefix | segments], spans, start + length}
@@ -158,6 +154,22 @@ defmodule LatexUnicode.Spans do
     tail = binary_part(source, last_end, byte_size(source) - last_end)
     {IO.iodata_to_binary([Enum.reverse(segments), tail]), spans}
   end
+
+  defp block_replacement(_text, raw, {false, _fence?}), do: raw
+
+  defp block_replacement(text, raw, {true, fence?}) do
+    case LatexUnicode.render(text, display: true) do
+      nil -> raw
+      rendered -> fence(rendered, fence?)
+    end
+  end
+
+  # The art of a display span leans on its indentation and on its line breaks, and a
+  # markdown parser keeps both only inside a fenced block: without one, the denominator
+  # of a fraction is read as a code block of its own and the numerator folds into the
+  # paragraph above it.
+  defp fence(rendered, false), do: rendered
+  defp fence(rendered, true), do: "```text\n" <> rendered <> "\n```"
 
   # pi's block tokenizers match a `$$` or `\[` delimiter at the start of a
   # line; fenced code blocks are skipped.

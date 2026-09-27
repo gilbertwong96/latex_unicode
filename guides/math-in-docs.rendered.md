@@ -44,11 +44,15 @@ reading. `mix ci` runs the check that follows, so the two cannot drift apart unn
 
 ## A formula, drawn
 
-Display math stacks into art. This is the page's own source, rendered:
+Display math stacks into art. This is the page's own source, rendered — and fenced,
+since markdown keeps the art's indentation and its line breaks only inside a fenced
+block:
 
+```text
 -b ± √(b² - 4ac)
 ────────────────
        2a
+```
 
 and an inline one, the same way it would appear in prose: the area is a² + b² = c²
 for a right triangle.
