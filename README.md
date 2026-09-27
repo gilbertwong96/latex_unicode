@@ -1,5 +1,9 @@
 # LatexUnicode
 
+[![CI](https://github.com/gilbertwong96/latex_unicode/actions/workflows/ci.yml/badge.svg)](https://github.com/gilbertwong96/latex_unicode/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/gilbertwong96/latex_unicode/graph/badge.svg)](https://codecov.io/gh/gilbertwong96/latex_unicode)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Render LaTeX math as Unicode text — for terminals, code comments, log output, and
 anywhere rich formatting is not available. Pure Elixir, no dependencies, no TeX
 installation, no image backend.
@@ -48,6 +52,22 @@ lines = source |> String.split("\n") |> Spans.substitute(spans)
   streaming response never flickers
 - math inside fenced code blocks is left alone
 
+For markdown something else will read — a `@doc` string, a guide page — the math can be
+rendered into the text itself, with nothing to keep in step:
+
+```elixir
+@doc LatexUnicode.Spans.render("""
+The identity $e^{i\\pi} + 1 = 0$ holds in the complex plane.
+""")
+```
+
+Display math arrives in a fenced block labelled `text`, because markdown keeps the art's
+indentation and its line breaks only inside one; `fence: false` is the way back for text
+no parser runs over, such as a log line. A guide page is a file rather than an
+expression, so `mix latex_unicode.render` writes the rendered copy beside it and
+`--check` fails when the two drift apart. This repository's own page is
+[Math in docs](guides/math-in-docs.rendered.md).
+
 ## What it renders
 
 Symbols (Greek, relations, arrows, big operators, delimiters, dots), scripts
@@ -89,6 +109,7 @@ end
 ```text
 compile --all-warnings --warnings-as-errors
 format --check-formatted
+latex_unicode.render --check guides/math-in-docs.md
 credo --strict          # includes the ExSlop AI-slop checks
 deps.unlock --check-unused
 hex.audit
@@ -100,8 +121,9 @@ test --warnings-as-errors
 ```
 
 CI's test job runs `mix compile`, `mix format` and `mix test` on Elixir 1.19/OTP 27,
-1.19/OTP 28 and 1.20/OTP 29. The quality job runs `mix ci` once on the newest pair,
-holds coverage at 91%, and caches Dialyzer's PLT against the lockfile.
+1.19/OTP 28 and 1.20/OTP 29. The quality job runs `mix ci`, builds the docs with
+warnings as errors, holds coverage at 93%, and caches Dialyzer's PLT against the
+lockfile.
 
 `mix ci.fast` is the inner loop: the list above without `deps.unlock
 --check-unused`, `hex.audit`, `xref graph --label compile-connected --fail-above 5`,
