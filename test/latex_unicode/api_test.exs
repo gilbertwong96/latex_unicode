@@ -205,19 +205,24 @@ defmodule LatexUnicode.ApiTest do
     {"👨‍👩‍👧", 2}
   ]
 
-  # {text, expected}: math inside text that no markdown parser runs over in between —
-  # the `Spans.render/2` entry point, for a plain text file, a log line or a doc string.
+  # {text, options, expected}: math inside text, through the `Spans.render/2` entry
+  # point. Display math is fenced, because a markdown parser keeps the art's indentation
+  # and its line breaks only inside a fenced block; `fence: false` is for text no parser
+  # runs over afterwards, such as a log line or a help message.
   @text_cases [
-    {"the identity $e^{i\\pi} + 1 = 0$ holds", "the identity e^(iπ) + 1 = 0 holds"},
-    {"two $a^2$ and $b^2$ spans", "two a² and b² spans"},
-    {"$$\\frac{1}{2}$$", "1\n─\n2"},
-    {"cost is $5 and $x^2$ here", "cost is $5 and x² here"},
-    {"an unfinished $x^2 keeps its source", "an unfinished $x^2 keeps its source"},
-    {"```\n$x^2$\n```", "```\n$x^2$\n```"},
-    {"$$\\frac{1}{2}$$\n\n```\n$x^2$\n```", "1\n─\n2\n\n```\n$x^2$\n```"},
-    {"see $a^2$ here\n\n```\n$x^2$\n```", "see a² here\n\n```\n$x^2$\n```"},
-    {"plain text is plain text", "plain text is plain text"},
-    {"trailing newline stays\n", "trailing newline stays\n"}
+    {"the identity $e^{i\\pi} + 1 = 0$ holds", [], "the identity e^(iπ) + 1 = 0 holds"},
+    {"two $a^2$ and $b^2$ spans", [], "two a² and b² spans"},
+    {"$$\\frac{1}{2}$$", [], "```text\n1\n─\n2\n```"},
+    {"$$a^2$$", [], "```text\na²\n```"},
+    {"cost is $5 and $x^2$ here", [], "cost is $5 and x² here"},
+    {"an unfinished $x^2 keeps its source", [], "an unfinished $x^2 keeps its source"},
+    {"```\n$x^2$\n```", [], "```\n$x^2$\n```"},
+    {"$$\\frac{1}{2}$$\n\n```\n$x^2$\n```", [], "```text\n1\n─\n2\n```\n\n```\n$x^2$\n```"},
+    {"see $a^2$ here\n\n```\n$x^2$\n```", [], "see a² here\n\n```\n$x^2$\n```"},
+    {"$$\\frac{1}{2}$$", [fence: false], "1\n─\n2"},
+    {"$$\\frac{1}{2}$$\n\nafter", [fence: false], "1\n─\n2\n\nafter"},
+    {"plain text is plain text", [], "plain text is plain text"},
+    {"trailing newline stays\n", [], "trailing newline stays\n"}
   ]
 
   # One test, so the catalogue reads in this order rather than whatever order ExUnit
@@ -272,14 +277,15 @@ defmodule LatexUnicode.ApiTest do
   defp check_texts(section, cases) do
     IO.puts("\n── #{section}: #{length(cases)} cases ──")
 
-    for {text, expected} <- cases do
-      rendered = Spans.render(text)
+    for {text, options, expected} <- cases do
+      rendered = Spans.render(text, options)
 
-      IO.puts("  #{inspect(text)}")
+      IO.puts("  Spans.render(#{inspect(text)}, #{inspect(options)})")
       IO.puts(indent(rendered))
 
       assert rendered == expected,
-             "#{inspect(text)} rendered #{inspect(rendered)}, expected #{inspect(expected)}"
+             "Spans.render(#{inspect(text)}, #{inspect(options)}) rendered " <>
+               "#{inspect(rendered)}, expected #{inspect(expected)}"
     end
   end
 
