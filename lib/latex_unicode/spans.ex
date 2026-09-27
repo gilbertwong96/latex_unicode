@@ -44,12 +44,35 @@ defmodule LatexUnicode.Spans do
   @spec extract(String.t(), keyword()) :: {String.t(), spans()}
   def extract(source, opts \\ []) do
     render? = Keyword.get(opts, :render_latex, true)
-    fenced = fenced_ranges(source)
 
-    {source, spans} = extract_blocks(source, fenced, render?, %{})
-    {source, spans} = extract_inlines(source, fenced, render?, spans)
+    {source, spans} = extract_blocks(source, fenced_ranges(source), render?, %{})
+    {source, spans} = extract_inlines(source, render?, spans)
 
     {source, spans}
+  end
+
+  @doc """
+  Render the math spans in `source` in place, for text that no markdown parser runs
+  over in between.
+
+  `extract/2` and `substitute/2` are two halves because a markdown parser has to see
+  the source between them; when there is no parser — a plain text file, a log line, a
+  help message, a doc string — this does both in one call and leaves the text's own
+  line breaks alone, the last newline included.
+
+      iex> LatexUnicode.Spans.render("the identity $e^{i\\\\pi} + 1 = 0$ holds")
+      "the identity e^(iπ) + 1 = 0 holds"
+
+  The options are `extract/2`'s: `render_latex: false` leaves every span as written.
+  """
+  @spec render(String.t(), keyword()) :: String.t()
+  def render(source, opts \\ []) do
+    {source, spans} = extract(source, opts)
+
+    source
+    |> String.split("\n", trim: false)
+    |> substitute(spans)
+    |> Enum.join("\n")
   end
 
   @doc "Replace the placeholders in rendered lines with their math."
@@ -152,19 +175,29 @@ defmodule LatexUnicode.Spans do
 
   # --- inline spans ---
 
-  defp extract_inlines(source, fenced, render?, spans) do
-    {lines, {spans, _offset}} =
+  # The fence state is carried line by line rather than looked up by offset: every line
+  # the pass replaces a span on changes length — a placeholder is not the size of the
+  # span it stands for — so offsets measured before the pass cannot be trusted during it.
+  defp extract_inlines(source, render?, spans) do
+    {lines, {spans, _open}} =
       source
       |> String.split("\n")
-      |> Enum.map_reduce({spans, 0}, fn line, {spans, offset} ->
-        {line, spans} =
-          if fenced?(fenced, offset) do
-            {line, spans}
-          else
-            scan_inline(line, 0, render?, spans)
-          end
+      |> Enum.map_reduce({spans, nil}, fn line, {spans, open} ->
+        cond do
+          open != nil and closing_fence?(line, open) ->
+            {line, {spans, nil}}
 
-        {line, {spans, offset + byte_size(line) + 1}}
+          open != nil ->
+            {line, {spans, open}}
+
+          match = Regex.run(@fence, line) ->
+            [_fence, marker] = match
+            {line, {spans, marker}}
+
+          true ->
+            {line, spans} = scan_inline(line, 0, render?, spans)
+            {line, {spans, open}}
+        end
       end)
 
     {Enum.join(lines, "\n"), spans}
@@ -184,6 +217,12 @@ defmodule LatexUnicode.Spans do
 
           {:ok, raw, text} ->
             replace_span(line, index, raw, text, render?, spans)
+
+          # A span whose closing delimiter has not arrived keeps its source, which is
+          # what pi does with a pending token and what stops a streaming answer from
+          # flickering between source and math.
+          {:pending, raw, text} ->
+            replace_span(line, index, raw, text, false, spans)
         end
     end
   end
@@ -210,13 +249,15 @@ defmodule LatexUnicode.Spans do
   end
 
   defp next_inline_start(line, from) do
-    [index_of(line, "$"), index_of(line, "\\("), index_of(line, "\\[")]
-    |> Enum.reject(&(&1 == nil or &1 < from))
+    [index_of(line, "$", from), index_of(line, "\\(", from), index_of(line, "\\[", from)]
+    |> Enum.reject(&(&1 == nil))
     |> Enum.min(fn -> nil end)
   end
 
-  defp index_of(line, needle) do
-    case :binary.match(line, needle) do
+  # The search starts at `from` rather than at the beginning of the line: a `$` that was
+  # rejected as not math (`$5`, say) is behind us, and a span after it is still math.
+  defp index_of(line, needle, from) do
+    case :binary.match(line, needle, scope: {from, byte_size(line) - from}) do
       {index, _length} -> index
       :nomatch -> nil
     end
@@ -256,7 +297,7 @@ defmodule LatexUnicode.Spans do
         inner = binary_part(source, byte_size(opening), byte_size(source) - byte_size(opening))
 
         if String.starts_with?(opening, "\\") or looks_like_pending_dollar_math?(inner) do
-          {:ok, source, inner}
+          {:pending, source, inner}
         else
           :none
         end
