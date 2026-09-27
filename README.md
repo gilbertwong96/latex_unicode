@@ -107,6 +107,11 @@ holds coverage at 91%, and caches Dialyzer's PLT against the lockfile.
 --check-unused`, `hex.audit`, `xref graph --label compile-connected --fail-above 5`,
 `dialyzer`, `ex_dna` and `reach.check --dead-code --smells`.
 
+`examples/compare_with_pi.exs` renders and measures the same inputs with pi's own
+`renderLatex` and `visibleWidth`, and reports where the two agree and where this library
+is meant to differ: a divergence that is not listed as one fails the run. It reads pi's
+source with `gh` and runs it with `bun`, so it is not part of `mix ci`.
+
 Elixir 1.19 is the floor, and the toolchain sets it rather than the library:
 `reach` needs 1.18, and the `ex_ast` it depends on needs 1.19. Everything is
 `dev`/`test` scoped with `runtime: false`, so a consumer's dependency tree stays
