@@ -19,13 +19,22 @@ defmodule LatexUnicode.Width do
   @cache_size 512
   @cache_key {__MODULE__, :cache}
 
-  # Mark categories and properties, per codepoint. pi spells these as Unicode
-  # property regexes; Erlang's `re` has them all except the `Mark` and `Control`
-  # aggregates, which are spelled out here.
+  # Mark categories, per codepoint. pi spells these as Unicode property regexes, and
+  # `re` answers for the general categories on every release this library supports.
   @mark ~r/^[\p{Mn}\p{Mc}\p{Me}]$/u
   @spacing_mark ~r/^[\p{Mc}]$/u
-  @zero_width ~r/^[\p{Default_Ignorable_Code_Point}\p{Cc}\p{Cs}\p{Mn}\p{Mc}\p{Me}]$/u
-  @non_printing ~r/^[\p{Default_Ignorable_Code_Point}\p{Cc}\p{Cf}\p{Cs}\p{Mn}\p{Mc}\p{Me}]$/u
+
+  # pi's `zeroWidthRegex` and `nonPrintingRegex` differ only in whether they name
+  # `\p{Cf}`: the derived `Default_Ignorable_Code_Point` both of them carry already
+  # contains the format characters, so the two sets are one set — measured, they agree
+  # on every codepoint — and it is written once here.
+  #
+  # The derived property itself is spelled out as ranges rather than named: Erlang/OTP
+  # 27's PCRE rejects the name, which CI caught as `unknown property name after \P or
+  # \p`, and the same numbers should come out of every release. The ranges are what
+  # `PropList.txt` calls `Other_Default_Ignorable_Code_Point`, which is all the derived
+  # property adds to the categories below it — 3773 of the set's 6477 codepoints.
+  @non_printing ~r/^[\x{034F}\x{115F}-\x{1160}\x{17B4}-\x{17B5}\x{2065}\x{3164}\x{FFA0}\x{FFF0}-\x{FFF8}\x{E0000}\x{E0002}-\x{E001F}\x{E0080}-\x{E00FF}\x{E01F0}-\x{E0FFF}\p{Cc}\p{Cf}\p{Cs}\p{Mn}\p{Mc}\p{Me}]$/u
   @emoji_presentation ~r/^[\p{Emoji_Presentation}]$/u
   @extended_pictographic ~r/^[\p{Extended_Pictographic}]$/u
 
@@ -107,7 +116,7 @@ defmodule LatexUnicode.Width do
       Enum.all?(codepoints, &spacing_mark?/1) ->
         length(codepoints)
 
-      Enum.all?(codepoints, &zero_width?/1) ->
+      Enum.all?(codepoints, &non_printing?/1) ->
         0
 
       true ->
@@ -186,7 +195,6 @@ defmodule LatexUnicode.Width do
   end
 
   defp mark?(codepoint), do: matches?(@mark, codepoint)
-  defp zero_width?(codepoint), do: matches?(@zero_width, codepoint)
   defp non_printing?(codepoint), do: matches?(@non_printing, codepoint)
   defp emoji_presentation?(codepoint), do: matches?(@emoji_presentation, codepoint)
   defp extended_pictographic?(codepoint), do: matches?(@extended_pictographic, codepoint)

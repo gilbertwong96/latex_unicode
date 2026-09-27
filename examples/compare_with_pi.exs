@@ -97,6 +97,14 @@ defmodule CompareWithPi do
     {"\u200B", :same},
     {"a\u200Bb", :same},
     {"\u00AD", :same},
+    # The derived Default_Ignorable_Code_Point this library spells as ranges: a filler
+    # its East Asian Width table would give one or two cells to, a Khmer sign, and one
+    # of the tag block's codepoints.
+    {"\u3164", :same},
+    {"a\u3164b", :same},
+    {"\uFFA0", :same},
+    {"\u17B4", :same},
+    {"\uFFF0", :same},
     {"─", :same},
     {"│", :same},
     {"⎛", :same},
@@ -121,6 +129,7 @@ defmodule CompareWithPi do
     0x0900..0x097F,
     0x0E00..0x0E7F,
     0x1100..0x11FF,
+    0x1780..0x17FF,
     0x2000..0x206F,
     0x20D0..0x20F0,
     0x2100..0x214F,
@@ -134,6 +143,7 @@ defmodule CompareWithPi do
     0x2E80..0x2EFF,
     0x3000..0x303F,
     0x3040..0x30FF,
+    0x3100..0x317F,
     0x4E00..0x4E20,
     0xFE00..0xFE0F,
     0xFE30..0xFE4F,

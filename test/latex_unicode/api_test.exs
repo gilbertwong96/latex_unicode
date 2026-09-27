@@ -155,6 +155,15 @@ defmodule LatexUnicode.ApiTest do
     {"\u200D", 0},
     {"\u0301", 0},
     {"\u00AD", 0},
+    # The derived Default_Ignorable_Code_Point, which `Width` spells as ranges rather
+    # than as a property name: a filler its East Asian Width table answers for, the Khmer
+    # one, one of the tag block's codepoints, and the fillers in context.
+    {"\u3164", 0},
+    {"a\u3164b", 2},
+    {"\uFFA0", 0},
+    {"\u17B4", 0},
+    {"\uFFF0", 0},
+    {"\u{E0002}", 0},
     # The glyphs the renderer itself draws, and the private-use markers its layout pass
     # leaves in the text.
     {"─", 1},
