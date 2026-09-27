@@ -16,11 +16,23 @@ defmodule LatexUnicode.MixProject do
       elixir: @elixir,
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      # ExCoveralls rather than the built-in reporter: it is what writes the
-      # `cover/excoveralls.json` the coverage step ingests. The bar itself sits
-      # in that step, because `mix coveralls.json` exits 0 with the bar set
-      # above the actual total.
-      test_coverage: [tool: ExCoveralls],
+      test_coverage: [
+        # ExCoveralls as the backend: its JSON is what Codecov ingests, and
+        # `mix coveralls.json` only works when its tool is selected. Measured: under
+        # this tool the built-in `threshold` check does not fire, so the gate that
+        # actually bites is the explicit check in the CI coverage step — this key is
+        # kept for the built-in reporter.
+        tool: ExCoveralls,
+        threshold: 93
+      ],
+      coveralls: [
+        # ExCoveralls' own bar, which is what `mix coveralls` honours. Measured: `mix
+        # coveralls.json` does not enforce it — the total stayed at 93.4% with this key
+        # set to 99 — so CI holds the number itself. Nothing is listed under
+        # `ignore_modules`: the files that measure 0% are struct definitions with no
+        # relevant lines, not uncovered code.
+        minimum_coverage: 93
+      ],
       aliases: aliases(),
       # `Mix.raise/1` and `Mix.shell/0` are in the mix task, which Dialyzer knows nothing
       # about unless the application is in the PLT.
@@ -52,6 +64,9 @@ defmodule LatexUnicode.MixProject do
   end
 
   defp aliases do
+    # The one guide is named here rather than looked up: the task takes files, and a
+    # second guide would have to be added to both lists, which is the point — a page
+    # nobody checks is a page that drifts.
     [
       "ci.fast": [
         "cmd mix compile --all-warnings --warnings-as-errors",
