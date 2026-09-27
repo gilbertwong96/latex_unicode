@@ -20,6 +20,7 @@ defmodule LatexUnicode.ApiTest do
   use ExUnit.Case, async: false
 
   alias LatexUnicode
+  alias LatexUnicode.Spans
   alias LatexUnicode.Width
 
   # {source, options, expected}: the letterlike alphabets, which pi renders as plain
@@ -204,6 +205,21 @@ defmodule LatexUnicode.ApiTest do
     {"👨‍👩‍👧", 2}
   ]
 
+  # {text, expected}: math inside text that no markdown parser runs over in between —
+  # the `Spans.render/2` entry point, for a plain text file, a log line or a doc string.
+  @text_cases [
+    {"the identity $e^{i\\pi} + 1 = 0$ holds", "the identity e^(iπ) + 1 = 0 holds"},
+    {"two $a^2$ and $b^2$ spans", "two a² and b² spans"},
+    {"$$\\frac{1}{2}$$", "1\n─\n2"},
+    {"cost is $5 and $x^2$ here", "cost is $5 and x² here"},
+    {"an unfinished $x^2 keeps its source", "an unfinished $x^2 keeps its source"},
+    {"```\n$x^2$\n```", "```\n$x^2$\n```"},
+    {"$$\\frac{1}{2}$$\n\n```\n$x^2$\n```", "1\n─\n2\n\n```\n$x^2$\n```"},
+    {"see $a^2$ here\n\n```\n$x^2$\n```", "see a² here\n\n```\n$x^2$\n```"},
+    {"plain text is plain text", "plain text is plain text"},
+    {"trailing newline stays\n", "trailing newline stays\n"}
+  ]
+
   # One test, so the catalogue reads in this order rather than whatever order ExUnit
   # shuffles tests into, and so its sections are not interleaved with another file's.
   test "every case the API was checked against" do
@@ -213,6 +229,7 @@ defmodule LatexUnicode.ApiTest do
     check_widths("width", @width_cases, &Width.display/1, 24)
     check_widths("grapheme cluster", @cluster_cases, &Width.grapheme_width/1, 14)
     check_widths("escape sequences", @escape_cases, &Width.display/1, 40)
+    check_texts("text with math", @text_cases)
   end
 
   test "keeps the measurement cache in the calling process" do
@@ -249,6 +266,20 @@ defmodule LatexUnicode.ApiTest do
 
       assert measured == expected,
              "#{inspect(text)} measures #{measured}, expected #{expected}"
+    end
+  end
+
+  defp check_texts(section, cases) do
+    IO.puts("\n── #{section}: #{length(cases)} cases ──")
+
+    for {text, expected} <- cases do
+      rendered = Spans.render(text)
+
+      IO.puts("  #{inspect(text)}")
+      IO.puts(indent(rendered))
+
+      assert rendered == expected,
+             "#{inspect(text)} rendered #{inspect(rendered)}, expected #{inspect(expected)}"
     end
   end
 
